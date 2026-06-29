@@ -1,0 +1,8 @@
+Enterpyrogram
+tgcrypto
+requests
+faster-whisper
+pysubs2
+google-generativeai
+unidecode
+psutil
