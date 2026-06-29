@@ -1,4 +1,4 @@
-hereimport os, time, asyncio, threading, requests
+import os, time, asyncio, threading, requests, psutil
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -9,7 +9,7 @@ API_HASH = os.getenv("API_HASH", "").strip()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "").strip()
 REPO_NAME = os.getenv("REPO_NAME", "").strip()
-PORT = 7860  # Hugging Face default port
+PORT = 7860  # Hugging Face default Port
 
 OWNER_ID = 5351848105       
 ALLOWED_USERS = [5344078567]             
@@ -21,6 +21,7 @@ users_data, UNAUTHORIZED_CAPTURED, BANNED_USERS = {}, set(), set()
 BOT_BUSY = False
 SLEEP_UNTIL = 0
 
+# --- SIMPLE SEQUENTIAL QUEUE SYSTEM ---
 task_queue = []
 
 async def process_next_task():
@@ -69,7 +70,42 @@ async def trigger_github(workflow_name, task):
 @app.on_message(filters.command("start"))
 async def start(c, m: Message):
     if not is_authorized(m) or time.time() < SLEEP_UNTIL: return
-    text = "<b>🔥 All-in-One Subtitle Bot 🔥</b>\n\n<b>🎬 Encode/Hardsub:</b> /hsub, /extracttrack, /1080pdd, /720pdd, /480pdd\n<b>📝 AI Generate:</b> Reply to Video -> `/vtt`, `/srt`, `/ass`\n<b>🇮🇳 Gemini Translate:</b> Reply to Sub File -> `/hienglish`\n\n/cancel - Clear Active Task"
+    text = (
+        "<b>🔥 All-in-One Subtitle Bot 🔥</b>\n\n"
+        "<b>🎬 Encode/Hardsub:</b> /hsub, /extracttrack, /1080pdd, /720pdd, /480pdd\n"
+        "<b>📝 AI Generate:</b> Reply to Video -> `/vtt`, `/srt`, `/ass`\n"
+        "<b>🇮🇳 Gemini Translate:</b> Reply to Sub File -> `/hienglish`\n\n"
+        "<b>⚙️ Management:</b>\n"
+        "📊 /stats - Live system diagnosis (RAM/CPU/Queue)\n"
+        "📋 /queue - Active background tasks list\n"
+        "🛑 /cancel - Clear active task queue"
+    )
+    await m.reply(text)
+
+@app.on_message(filters.command("stats"))
+async def stats_cmd(c, m: Message):
+    if not is_authorized(m): return
+    ram = psutil.virtual_memory()
+    cpu = psutil.cpu_percent()
+    text = (
+        "📊 **System Status:**\n\n"
+        "🖥️ **CPU Usage:** `{cpu}%`\n"
+        "💾 **RAM Usage:** `{ram.percent}%` ({ram.used // 1048576}MB / {ram.total // 1048576}MB)\n"
+        "🔄 **Queue Length:** `{len(task_queue)}` tasks\n"
+        "🤖 **Bot Busy:** `{BOT_BUSY}`"
+    )
+    await m.reply(text)
+
+@app.on_message(filters.command("queue"))
+async def queue_cmd(c, m: Message):
+    if not is_authorized(m): return
+    if not task_queue:
+        return await m.reply("📭 Queue is currently empty.")
+    
+    text = "📋 **Current Task Queue:**\n\n"
+    for idx, (task_func, args) in enumerate(task_queue, 1):
+        task_name = task_func.__name__.replace("run_", "").replace("_task", "").upper()
+        text += f"**#{idx}**: `{task_name}`\n"
     await m.reply(text)
 
 @app.on_message(filters.command(["cancel", "skip", "remm"]))
@@ -221,7 +257,8 @@ async def inputs(c, m: Message):
                 users_data.pop(uid, None)
                 
         elif state == "WAIT_RENAME_TEXT" and m.text:
-            d["file_name"] = m.text.strip() + ".mp4" if not m.text.endswith(".mp4") else m.text.strip()
+            # File name extension handle clean tarike se kiya hai
+            d["file_name"] = m.text.strip() + ".mp4" if not m.text.lower().endswith(".mp4") else m.text.strip()
             await send_hsub(uid, m)
 
 @app.on_callback_query()
@@ -282,4 +319,47 @@ async def send_hsub(uid, msg):
     }
     
     pos = await add_to_queue(run_hsub_task, task_payload, st)
-    if pos > 1
+    if pos > 1:
+        await st.edit(f"⏳ **Task queued at Position #{pos}.** It will start automatically.")
+
+# ================= HF ALIVE WEB SERVER =================
+class Health(BaseHTTPRequestHandler):
+    def do_GET(self): 
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot Active on HF!")
+    
+    def do_HEAD(self): 
+        self.send_response(200)
+        self.end_headers()
+
+async def keep_alive():
+    await asyncio.sleep(15)
+    app_url = os.getenv("RENDER_EXTERNAL_URL")  # keep backwards compatibility if any
+    pings = ["http://127.0.0.1:7860"]
+    if app_url:
+        if not app_url.startswith("http"): app_url = f"https://{app_url}"
+        pings.append(app_url)
+        
+    while True:
+        for url in pings:
+            try: requests.get(url, timeout=10)
+            except: pass
+        await asyncio.sleep(5 * 60)
+
+async def main_loop():
+    try:
+        await app.start()
+        print("🚀 Bot Started on Hugging Face!")
+        asyncio.create_task(keep_alive())
+        await idle()
+        await app.stop()
+    except FloodWait as e:
+        print(f"Bhai Telegram ne FloodWait diya hai: {e.value} seconds ka wait karo.")
+        await asyncio.sleep(e.value)
+    except Exception as e:
+        print(f"Bot Crashed: {e}")
+
+if __name__ == "__main__":
+    threading.Thread(target=lambda: HTTPServer(("0.0.0.0", PORT), Health).serve_forever(), daemon=True).start()
+    asyncio.get_event_loop().run_until_complete(main_loop())
