@@ -60,7 +60,6 @@ def get_duration(file_path):
 
 # --- FFMPEG REAL-TIME PARSER ---
 async def run_ffmpeg_progress(cmd, duration, app, mid):
-    # Ffmpeg progress data streams parsing (Stdout pipe par)
     cmd_with_progress = cmd[:-1] + ["-progress", "pipe:1", "-nostats"] + [cmd[-1]]
     
     process = await asyncio.create_subprocess_exec(
@@ -141,6 +140,10 @@ async def dl(app):
 # ================= STAGE 2: ENCODE (WITH REAL-TIME TRACKING) =================
 async def enc(app, v, s, w, mid):
     out = RENAME if RENAME != "none" else "out.mp4"
+    
+    # SECURITY PATCH: Agar koi galti se rename me directory path ya slash '/' daal de, toh use clean karne ke liye
+    out = os.path.basename(out)
+    
     valid_res = RESO and RESO.strip().lower() not in ["none", "original", ""]
     
     if TASK_TYPE == "hsub":
@@ -174,7 +177,6 @@ async def enc(app, v, s, w, mid):
 async def up(app, out, rc, err, mid):
     if rc == 0 and os.path.exists(out) and os.path.getsize(out) > 0:
         reset_prog()
-        # FIX: Yahan exact rename kiya gaya filename capture karke use kiya jayega
         file_name = os.path.basename(out)
         await app.send_document(
             CHAT_ID, 
