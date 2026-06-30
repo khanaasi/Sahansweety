@@ -25,35 +25,56 @@ def reset_prog():
 
 async def prog(c, t, action):
     global last_time, start_time
-    now = time.time()
-    if start_time == 0:
-        start_time = now
-        last_time = now
-        return
-        
-    if now - last_time > 8 or c == t:
-        elapsed = now - start_time
-        speed = c / elapsed if elapsed > 0 else 0
-        speed_mb = speed / 1048576
-        percentage = (c / t) * 100
-        bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
-        
-        try: 
-            await app.edit_message_text(
-                CHAT_ID, MSG_ID, 
-                f"▸ **Status:** {action}\n"
-                f"📊 `[{bar}] {percentage:.2f}%`\n"
-                f"📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`\n"
-                f"⚡ **Speed:** `{speed_mb:.2f} MB/s`"
-            )
-        except: 
-            pass
-        last_time = now
+    try:
+        now = time.time()
+        if start_time == 0:
+            start_time = now
+            last_time = now
+            return
+            
+        if now - last_time > 8 or c == t:
+            elapsed = now - start_time
+            speed = c / elapsed if elapsed > 0 else 0
+            speed_mb = speed / 1048576
+            percentage = (c / t) * 100 if t and t > 0 else 0
+            bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
+            
+            try: 
+                await app.edit_message_text(
+                    CHAT_ID, MSG_ID, 
+                    f"▸ **Status:** {action}\n"
+                    f"📊 `[{bar}] {percentage:.2f}%`\n"
+                    f"📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`\n"
+                    f"⚡ **Speed:** `{speed_mb:.2f} MB/s`"
+                )
+            except: 
+                pass
+            last_time = now
+    except Exception as e:
+        print("Progress callback error:", e)
 
 def apply_asi(fp):
     subs = pysubs2.load(fp)
     if not subs: return
-    ass = f"""[Script Info]\nTitle: ASI ASS\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: WM,Arial,140,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,2,9,10,40,40,1\nStyle: Default,Arial,90,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,-1,0,0,100,100,0,0,1,3.8,2,2,100,100,58,1\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 10,0:00:00.00,9:59:59.99,WM,,0000,0000,0000,,{{\\bord8\\blur5\\shad3}} {{\\c&HFF00FF&}}𝙰{{\\c&HFFFFFF&}}𝚂{{\\c&H00A0FF&}}𝙸☠\n"""
+    ass = f"""[Script Info]
+Title: ASI ASS Script - Complete & Fixed
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 1920
+PlayResY: 1080
+YCbCr Matrix: TV.601
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: ASI ᴀɴɪᴍᴇ_Watermark,Arial,140,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,2,9,10,40,40,1
+Style: Default,Arial,90,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,-1,0,0,100,100,0,0,1,3.8,2,2,100,100,58,1
+Style: Logo,Arial,30,&H00FFFFFF,&H00FFFFFF,&H000000FF,&H96000000,0,0,0,0,100,100,0,0,1,3,0,2,10,35,0.8,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 10,0:00:00.00,9:59:59.99,ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,0000,,{{\\bord8\\blur5\\shad3}} {{\\c&HFF00FF&}}𝙰{{\\c&HFFFFFF&}}𝚂{{\\c&H00A0FF&}}𝙸☠
+"""
     def mt(ms): return f"{ms//3600000}:{(ms%3600000)//60000:02d}:{(ms%60000)//1000:02d}.{(ms%1000)//10:02d}"
     for l in subs: ass += f"Dialogue: 0,{mt(l.start)},{mt(l.end)},Default,,0000,0000,0000,,{l.text.replace(chr(10), '\\N')}\n"
     with open(fp, "w", encoding="utf-8") as f: f.write(ass)
@@ -121,6 +142,7 @@ def p_hi(sp):
             valid_indices.append(i)
             
     if texts_to_translate:
+        # Safe batching of 40 lines to prevent Gemini timeouts or dropped sentences
         batch_size = 40
         for i in range(0, len(texts_to_translate), batch_size):
             batch_texts = texts_to_translate[i:i+batch_size]
@@ -143,6 +165,11 @@ async def main():
         await app.edit_message_text(CHAT_ID, MSG_ID, "📥 Preparing download...")
         reset_prog()
         fp = await app.download_media(FILE_ID, progress=prog, progress_args=("📥 Downloading Video...",))
+        
+        # Complete corrupt check
+        if not fp or not os.path.exists(fp) or os.path.getsize(fp) < 1000:
+            raise Exception("❌ Telegram side download error! Downloaded file is empty.")
+
         loop = asyncio.get_event_loop()
         if TASK_TYPE == "extract_english":
             await app.edit_message_text(CHAT_ID, MSG_ID, "⚙️ Generating English AI Subtitle...")
