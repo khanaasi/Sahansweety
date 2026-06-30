@@ -1,4 +1,4 @@
-import os, sys, time, asyncio, subprocess, pyrogram.utils
+import os, sys, time, asyncio, subprocess, pyrogram.utils, pysubs2
 from pyrogram import Client
 
 # Pyrogram ID bug fix (Strictly from your commit)
@@ -19,34 +19,38 @@ def reset_prog():
     last_time = time.time()
     start_time = time.time()
 
-# --- PROGRESS BAR (Speed, Size and Graphic Blocks) ---
+# --- PROGRESS BAR (Speed, Size and Graphic Blocks - Error Free) ---
 async def prog(c, t, app, mid, action):
     global last_time, start_time
-    now = time.time()
-    if start_time == 0:
-        start_time = now
-        last_time = now
-        return
-        
-    if now - last_time > 10 or c == t:
-        elapsed = now - start_time
-        speed = c / elapsed if elapsed > 0 else 0
-        speed_mb = speed / 1048576
-        percentage = (c / t) * 100
-        # 10 blocks graphic progress bar
-        bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
-        
-        try: 
-            await app.edit_message_text(
-                CHAT_ID, mid, 
-                f"▸ **Status:** {action}\n"
-                f"📊 `[{bar}] {percentage:.2f}%`\n"
-                f"📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`\n"
-                f"⚡ **Speed:** `{speed_mb:.2f} MB/s`"
-            )
-        except: 
-            pass
-        last_time = now
+    try:
+        now = time.time()
+        if start_time == 0:
+            start_time = now
+            last_time = now
+            return
+            
+        if now - last_time > 10 or c == t:
+            elapsed = now - start_time
+            speed = c / elapsed if elapsed > 0 else 0
+            speed_mb = speed / 1048576
+            # Zero division error safety
+            percentage = (c / t) * 100 if t and t > 0 else 0
+            # 10 blocks graphic progress bar
+            bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
+            
+            try: 
+                await app.edit_message_text(
+                    CHAT_ID, mid, 
+                    f"▸ **Status:** {action}\n"
+                    f"📊 `[{bar}] {percentage:.2f}%`\n"
+                    f"📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`\n"
+                    f"⚡ **Speed:** `{speed_mb:.2f} MB/s`"
+                )
+            except Exception as e: 
+                print("Telegram progress update error:", e)
+            last_time = now
+    except Exception as e:
+        print("Uncaught exception in progress bar:", e)
 
 # --- FFPROBE HELPERS ---
 def get_duration(file_path):
@@ -119,14 +123,76 @@ async def run_ffmpeg_progress(cmd, duration, app, mid):
     
     return process.returncode, "".join(stderr_lines[-20:])
 
+# --- UNIFIED SUBTITLE STYLER & WATERMARK INJECTOR ---
+def convert_and_style_sub(sub_path, video_duration):
+    def to_ass_time(seconds):
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        cs = int(round((seconds % 1) * 100))
+        if cs == 100:
+            cs = 0; s += 1
+            if s == 60: s = 0; m += 1
+            if m == 60: m = 0; h += 1
+        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+    end_time_str = to_ass_time(video_duration if video_duration > 0 else 36000)
+
+    try:
+        subs = pysubs2.load(sub_path, encoding="utf-8")
+    except:
+        subs = pysubs2.load(sub_path, encoding="latin-1")
+
+    # Complete fixed styling layout (Prevents scrolling & fixes font style)
+    styled_ass = f"""[Script Info]
+Title: ASI ASS Script - Complete & Fixed
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 1920
+PlayResY: 1080
+YCbCr Matrix: TV.601
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: ASI ᴀɴɪᴍᴇ_Watermark,Arial,140,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,5,2,9,10,40,40,1
+Style: Default,Arial,90,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,-1,0,0,100,100,0,0,1,3.8,2,2,100,100,58,1
+Style: Logo,Arial,30,&H00FFFFFF,&H00FFFFFF,&H000000FF,&H96000000,0,0,0,0,100,100,0,0,1,3,0,2,10,35,0.8,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,0000,,{{\\bord8\\blur5\\shad3}} {{\\c&HFF00FF&}}𝙰{{\\c&HFFFFFF&}}𝚂{{\\c&H00A0FF&}}𝙸☠
+"""
+
+    def mt(ms):
+        h = ms // 3600000
+        m = (ms % 3600000) // 60000
+        s = (ms % 60000) // 1000
+        cs = (ms % 1000) // 10
+        return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+    for line in subs:
+        if line.text.strip():
+            clean_text = line.text.replace('\n', '\\N').replace('\r', '')
+            styled_ass += f"Dialogue: 0,{mt(line.start)},{mt(line.end)},Default,,0000,0000,0000,,{clean_text}\n"
+
+    output_path = "styled_subtitle.ass"
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(styled_ass)
+    return output_path
+
 # ================= STAGE 1: DOWNLOAD =================
 async def dl(app):
     st = await app.send_message(CHAT_ID, "⚙️ Worker: Preparing Download...")
     
     reset_prog()
     v = await app.download_media(VIDEO_ID, file_name="video.mp4", progress=prog, progress_args=(app, st.id, "📥 Video..."))
-    s, w = None, None
     
+    # Complete corrupt check to prevent execution on empty files
+    if not v or not os.path.exists(v) or os.path.getsize(v) < 1000:
+        raise Exception("❌ Telegram side download error! Downloaded file is empty or corrupted.")
+
+    s, w = None, None
     if TASK_TYPE == "hsub":
         reset_prog()
         s = await app.download_media(SUB_ID, progress=prog, progress_args=(app, st.id, "📥 Subtitle..."))
@@ -140,14 +206,16 @@ async def dl(app):
 # ================= STAGE 2: ENCODE (WITH REAL-TIME TRACKING) =================
 async def enc(app, v, s, w, mid):
     out = RENAME if RENAME != "none" else "out.mp4"
-    
-    # SECURITY PATCH: Agar koi galti se rename me directory path ya slash '/' daal de, toh use clean karne ke liye
     out = os.path.basename(out)
     
+    duration = get_duration(v)
     valid_res = RESO and RESO.strip().lower() not in ["none", "original", ""]
     
     if TASK_TYPE == "hsub":
-        sub = os.path.abspath(s).replace('\\', '/')
+        # Process and style subtitles, injecting watermark from 0 to end of video
+        styled_sub_path = convert_and_style_sub(s, duration)
+        sub = os.path.abspath(styled_sub_path).replace('\\', '/')
+        
         if valid_res:
             v_filter = f"scale=-2:{RESO},subtitles='{sub}':charenc=UTF-8"
         else:
@@ -169,7 +237,6 @@ async def enc(app, v, s, w, mid):
         out = "extracted_sub.srt"
         cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "copy", out] 
     
-    duration = get_duration(v)
     rc, err = await run_ffmpeg_progress(cmd, duration, app, mid)
     return out, rc, err
 
