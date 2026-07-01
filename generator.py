@@ -48,7 +48,7 @@ async def prog(c, t, action):
         print("Progress callback error:", e)
 
 def clean_srt_tags(text):
-    """Strip all HTML and ASS formatting styles."""
+    """Generated text se tags aur codes strip karne ka filter."""
     text = re.sub(r'<[^>]+>', '', text)
     text = re.sub(r'{[^}]+}', '', text)
     return text.strip()
@@ -88,9 +88,9 @@ def p_eng(vp):
     subs = pysubs2.SSAFile()
     for s in segs:
         if s.text:
-            cleaned_text = clean_srt_tags(s.text)
-            if cleaned_text:
-                subs.append(pysubs2.SSAEvent(start=int(s.start*1000), end=int(s.end*1000), text=cleaned_text))
+            cleaned_txt = clean_srt_tags(s.text)
+            if cleaned_txt:
+                subs.append(pysubs2.SSAEvent(start=int(s.start*1000), end=int(s.end*1000), text=cleaned_txt))
     out = f"{FILE_NAME}.{FORMAT_TYPE}"
     subs.save(out)
     if FORMAT_TYPE == "ass" and STYLE_TYPE == "asi_style": apply_asi(out)
