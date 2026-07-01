@@ -1,4 +1,4 @@
-import os, sys, time, asyncio, subprocess, pyrogram.utils, pysubs2
+import os, sys, time, asyncio, subprocess, re, pyrogram.utils, pysubs2
 from pyrogram import Client
 
 # Pyrogram ID bug fix (Strictly from your commit)
@@ -71,66 +71,14 @@ def get_subtitle_streams(file_path):
         print("FFprobe subtitle stream error:", e)
         return []
 
-# --- FFMPEG REAL-TIME PARSER ---
-async def run_ffmpeg_progress(cmd, duration, app, mid):
-    cmd_with_progress = cmd[:-1] + ["-progress", "pipe:1", "-nostats"] + [cmd[-1]]
-    
-    process = await asyncio.create_subprocess_exec(
-        *cmd_with_progress,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    
-    speed = "0.00x"
-    percentage = 0.0
-    last_update = 0
-    stderr_lines = []
-    
-    async def read_stdout():
-        nonlocal speed, percentage, last_update
-        while True:
-            line = await process.stdout.readline()
-            if not line:
-                break
-            line_str = line.decode('utf-8', errors='ignore').strip()
-            
-            if "out_time_us=" in line_str:
-                try:
-                    us = int(line_str.split("=")[1])
-                    cur_secs = us / 1000000.0
-                    if duration > 0:
-                        percentage = (cur_secs / duration) * 100
-                        if percentage > 100.0: percentage = 100.0
-                except:
-                    pass
-            elif "speed=" in line_str:
-                speed = line_str.split("=")[1].strip()
-            elif "progress=" in line_str:
-                now = time.time()
-                if now - last_update > 8 or line_str.endswith("end"):
-                    bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
-                    try:
-                        await app.edit_message_text(
-                            CHAT_ID, mid,
-                            f"▸ **Status:** Encoding Video...\n"
-                            f"📊 `[{bar}] {percentage:.2f}%`\n"
-                            f"🚀 **Speed:** `{speed}`"
-                        )
-                    except:
-                        pass
-                    last_update = now
-
-    async def read_stderr():
-        while True:
-            line = await process.stderr.readline()
-            if not line:
-                break
-            stderr_lines.append(line.decode('utf-8', errors='ignore'))
-            
-    await asyncio.gather(read_stdout(), read_stderr())
-    await process.wait()
-    
-    return process.returncode, "".join(stderr_lines[-20:])
+# --- SRT SUBTITLE CLEANER ---
+def clean_srt_tags(text):
+    """HTML <font> and ASS styling tags ko puri tarah remove karne ka logic."""
+    # Strip HTML tags (<font>, <b>, <i> etc.)
+    text = re.sub(r'<[^>]+>', '', text)
+    # Strip ASS parameters ({\an2}, {\pos...} etc.)
+    text = re.sub(r'{[^}]+}', '', text)
+    return text.strip()
 
 # --- UNIFIED SUBTITLE STYLER & WATERMARK INJECTOR ---
 def convert_and_style_sub(sub_path, video_duration):
@@ -182,7 +130,9 @@ Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,00
 
     for line in subs:
         if line.text.strip():
-            clean_text = line.text.replace('\n', '\\N').replace('\r', '')
+            # Dialogues clean logic
+            clean_text = clean_srt_tags(line.text)
+            clean_text = clean_text.replace('\n', '\\N').replace('\r', '')
             styled_ass += f"Dialogue: 0,{mt(line.start)},{mt(line.end)},Default,,0000,0000,0000,,{clean_text}\n"
 
     output_path = "styled_subtitle.ass"
@@ -221,6 +171,7 @@ async def enc(app, v, s, w, mid):
     extracted_sub = None
     
     if TASK_TYPE == "hsub":
+        await app.edit_message_text(CHAT_ID, mid, "⚙️ Worker: Encoding Hardsub...")
         styled_sub_path = convert_and_style_sub(s, duration)
         sub = os.path.abspath(styled_sub_path).replace('\\', '/')
         
@@ -235,28 +186,39 @@ async def enc(app, v, s, w, mid):
             cmd = ["ffmpeg", "-y", "-i", v, "-vf", v_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out]
             
     elif TASK_TYPE == "resize": 
+        await app.edit_message_text(CHAT_ID, mid, "⚙️ Worker: Compressing Video...")
         if valid_res:
             scale_filter = f"scale=-2:{RESO}"
         else:
             scale_filter = "scale='trunc(iw/2)*2:trunc(ih/2)*2'"
         cmd = ["ffmpeg", "-y", "-i", v, "-vf", scale_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out]
         
-        # Checking for soft subtitle stream inside the video
+        # Soft subtitle extraction & clean tags logic
         sub_streams = get_subtitle_streams(v)
         if sub_streams:
             extracted_sub = "extracted_softsub.srt"
-            # Extract first soft subtitle track directly
             ext_cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "srt", extracted_sub]
             subprocess.run(ext_cmd, capture_output=True)
-            if not os.path.exists(extracted_sub) or os.path.getsize(extracted_sub) == 0:
+            if os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
+                try:
+                    # Formatting tags strip karke clean karne ka logic
+                    tmp_subs = pysubs2.load(extracted_sub)
+                    for line in tmp_subs:
+                        line.text = clean_srt_tags(line.text)
+                    tmp_subs.save(extracted_sub)
+                except Exception as e:
+                    print("Error cleaning softsub tags:", e)
+            else:
                 extracted_sub = None
         
     elif TASK_TYPE == "extract": 
+        await app.edit_message_text(CHAT_ID, mid, "⚙️ Worker: Extracting Subtitle...")
         out = "extracted_sub.srt"
         cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "copy", out] 
     
-    rc, err = await run_ffmpeg_progress(cmd, duration, app, mid)
-    return out, rc, err, extracted_sub
+    # 100% Native processing speed optimization (Runs synchronously without python overhead)
+    p = await asyncio.to_thread(subprocess.run, cmd, capture_output=True)
+    return out, p.returncode, p.stderr.decode('utf-8', errors='ignore'), extracted_sub
 
 # ================= STAGE 3: UPLOAD =================
 async def up(app, out, rc, err, mid, extracted_sub=None):
@@ -273,9 +235,9 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
             progress_args=(app, mid, "📤 Uploading Video...")
         )
         
-        # Softsub extension changed from .srt to .txt (Same name preserved)
+        # Softsub extension back to .srt as requested
         if extracted_sub and os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
-            sub_name = file_name.rsplit(".", 1)[0] + ".txt"
+            sub_name = file_name.rsplit(".", 1)[0] + ".srt"
             try:
                 os.rename(extracted_sub, sub_name)
                 await app.send_document(
@@ -290,7 +252,7 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
     else: 
         await app.edit_message_text(CHAT_ID, mid, f"❌ **Error:** `{err[-500:] if err else 'Unknown FFmpeg Error'}`")
 
-# ================= RUN MASTER (SUPERFAST ORIGINAL CONNECTION) =================
+# ================= RUN MASTER =================
 async def main():
     app = Client("w_master", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
