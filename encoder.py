@@ -19,7 +19,7 @@ def reset_prog():
     last_time = time.time()
     start_time = time.time()
 
-# --- PROGRESS BAR (Optimized for High-Speed and No-Rate-Limits) ---
+# --- PROGRESS BAR (Speed, Size and Graphic Blocks - Error Free) ---
 async def prog(c, t, app, mid, action):
     global last_time, start_time
     try:
@@ -29,8 +29,7 @@ async def prog(c, t, app, mid, action):
             last_time = now
             return
             
-        # 15 seconds interval prevents Telegram from throttling/limiting upload speeds
-        if now - last_time > 15 or c == t:
+        if now - last_time > 10 or c == t:
             elapsed = now - start_time
             speed = c / elapsed if elapsed > 0 else 0
             speed_mb = speed / 1048576
@@ -62,6 +61,7 @@ def get_duration(file_path):
         return 0.0
 
 def get_subtitle_streams(file_path):
+    """Checks if the video has soft subtitles embedded in it."""
     cmd = ["ffprobe", "-v", "error", "-select_streams", "s", "-show_entries", "stream=index", "-of", "csv=p=0", file_path]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
@@ -107,7 +107,7 @@ async def run_ffmpeg_progress(cmd, duration, app, mid):
                 speed = line_str.split("=")[1].strip()
             elif "progress=" in line_str:
                 now = time.time()
-                if now - last_update > 12 or line_str.endswith("end"):
+                if now - last_update > 8 or line_str.endswith("end"):
                     bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
                     try:
                         await app.edit_message_text(
@@ -152,6 +152,7 @@ def convert_and_style_sub(sub_path, video_duration):
     except:
         subs = pysubs2.load(sub_path, encoding="latin-1")
 
+    # Fixed styling layout (Prevents VTT/SRT scrolling & matches sizes)
     styled_ass = f"""[Script Info]
 Title: ASI ASS Script - Complete & Fixed
 ScriptType: v4.00+
@@ -244,6 +245,7 @@ async def enc(app, v, s, w, mid):
         sub_streams = get_subtitle_streams(v)
         if sub_streams:
             extracted_sub = "extracted_softsub.srt"
+            # Extract first soft subtitle track directly
             ext_cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "srt", extracted_sub]
             subprocess.run(ext_cmd, capture_output=True)
             if not os.path.exists(extracted_sub) or os.path.getsize(extracted_sub) == 0:
@@ -271,6 +273,7 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
             progress_args=(app, mid, "📤 Uploading Video...")
         )
         
+        # Softsub extension changed from .srt to .txt (Same name preserved)
         if extracted_sub and os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
             sub_name = file_name.rsplit(".", 1)[0] + ".txt"
             try:
@@ -287,10 +290,9 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
     else: 
         await app.edit_message_text(CHAT_ID, mid, f"❌ **Error:** `{err[-500:] if err else 'Unknown FFmpeg Error'}`")
 
-# ================= RUN MASTER (OPTIMIZED WITH 24 THREAD WORKERS) =================
+# ================= RUN MASTER (SUPERFAST ORIGINAL CONNECTION) =================
 async def main():
-    # 'workers=24' boosts the connection speeds and MTProto parallelism on GitHub Action runners
-    app = Client("w_master", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=24)
+    app = Client("w_master", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
     
     v, s, w, mid = await dl(app)
