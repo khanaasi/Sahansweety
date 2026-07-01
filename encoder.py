@@ -33,9 +33,7 @@ async def prog(c, t, app, mid, action):
             elapsed = now - start_time
             speed = c / elapsed if elapsed > 0 else 0
             speed_mb = speed / 1048576
-            # Zero division error safety
             percentage = (c / t) * 100 if t and t > 0 else 0
-            # 10 blocks graphic progress bar
             bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
             
             try: 
@@ -61,6 +59,17 @@ def get_duration(file_path):
     except Exception as e:
         print("FFprobe duration error:", e)
         return 0.0
+
+def get_subtitle_streams(file_path):
+    """Checks if the video has soft subtitles embedded in it."""
+    cmd = ["ffprobe", "-v", "error", "-select_streams", "s", "-show_entries", "stream=index", "-of", "csv=p=0", file_path]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        streams = res.stdout.strip().split('\n')
+        return [s.strip() for s in streams if s.strip()]
+    except Exception as e:
+        print("FFprobe subtitle stream error:", e)
+        return []
 
 # --- FFMPEG REAL-TIME PARSER ---
 async def run_ffmpeg_progress(cmd, duration, app, mid):
@@ -143,7 +152,7 @@ def convert_and_style_sub(sub_path, video_duration):
     except:
         subs = pysubs2.load(sub_path, encoding="latin-1")
 
-    # Complete fixed styling layout (Prevents scrolling & fixes font style)
+    # Fixed styling layout (Prevents VTT/SRT scrolling & matches sizes)
     styled_ass = f"""[Script Info]
 Title: ASI ASS Script - Complete & Fixed
 ScriptType: v4.00+
@@ -188,7 +197,6 @@ async def dl(app):
     reset_prog()
     v = await app.download_media(VIDEO_ID, file_name="video.mp4", progress=prog, progress_args=(app, st.id, "📥 Video..."))
     
-    # Complete corrupt check to prevent execution on empty files
     if not v or not os.path.exists(v) or os.path.getsize(v) < 1000:
         raise Exception("❌ Telegram side download error! Downloaded file is empty or corrupted.")
 
@@ -203,16 +211,16 @@ async def dl(app):
     await app.edit_message_text(CHAT_ID, st.id, "🔥 **Worker: Processing Started!**")
     return v, s, w, st.id
 
-# ================= STAGE 2: ENCODE (WITH REAL-TIME TRACKING) =================
+# ================= STAGE 2: ENCODE (WITH AUTO EXTRACT) =================
 async def enc(app, v, s, w, mid):
     out = RENAME if RENAME != "none" else "out.mp4"
     out = os.path.basename(out)
     
     duration = get_duration(v)
     valid_res = RESO and RESO.strip().lower() not in ["none", "original", ""]
+    extracted_sub = None
     
     if TASK_TYPE == "hsub":
-        # Process and style subtitles, injecting watermark from 0 to end of video
         styled_sub_path = convert_and_style_sub(s, duration)
         sub = os.path.abspath(styled_sub_path).replace('\\', '/')
         
@@ -233,25 +241,51 @@ async def enc(app, v, s, w, mid):
             scale_filter = "scale='trunc(iw/2)*2:trunc(ih/2)*2'"
         cmd = ["ffmpeg", "-y", "-i", v, "-vf", scale_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out]
         
+        # Checking for soft subtitle stream inside the video
+        sub_streams = get_subtitle_streams(v)
+        if sub_streams:
+            extracted_sub = "extracted_softsub.srt"
+            # Extract first soft subtitle track directly
+            ext_cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "srt", extracted_sub]
+            subprocess.run(ext_cmd, capture_output=True)
+            if not os.path.exists(extracted_sub) or os.path.getsize(extracted_sub) == 0:
+                extracted_sub = None
+        
     elif TASK_TYPE == "extract": 
         out = "extracted_sub.srt"
         cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "copy", out] 
     
     rc, err = await run_ffmpeg_progress(cmd, duration, app, mid)
-    return out, rc, err
+    return out, rc, err, extracted_sub
 
 # ================= STAGE 3: UPLOAD =================
-async def up(app, out, rc, err, mid):
+async def up(app, out, rc, err, mid, extracted_sub=None):
     if rc == 0 and os.path.exists(out) and os.path.getsize(out) > 0:
         reset_prog()
         file_name = os.path.basename(out)
+        
+        # Upload main video
         await app.send_document(
             CHAT_ID, 
             document=out, 
             caption=f"✅ **{file_name}**", 
             progress=prog, 
-            progress_args=(app, mid, "📤 Uploading...")
+            progress_args=(app, mid, "📤 Uploading Video...")
         )
+        
+        # If soft subtitle was extracted, send it right after the video
+        if extracted_sub and os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
+            sub_name = file_name.rsplit(".", 1)[0] + ".srt"
+            try:
+                os.rename(extracted_sub, sub_name)
+                await app.send_document(
+                    CHAT_ID, 
+                    document=sub_name, 
+                    caption=f"📄 **Extracted Soft Subtitle:** `{sub_name}`"
+                )
+            except Exception as e:
+                print("Error uploading extracted soft subtitle:", e)
+                
         await app.delete_messages(CHAT_ID, mid)
     else: 
         await app.edit_message_text(CHAT_ID, mid, f"❌ **Error:** `{err[-500:] if err else 'Unknown FFmpeg Error'}`")
@@ -262,8 +296,8 @@ async def main():
     await app.start()
     
     v, s, w, mid = await dl(app)
-    out, rc, err = await enc(app, v, s, w, mid)
-    await up(app, out, rc, err, mid)
+    out, rc, err, extracted_sub = await enc(app, v, s, w, mid)
+    await up(app, out, rc, err, mid, extracted_sub)
     
     await app.stop()
 
