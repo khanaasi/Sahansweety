@@ -1,5 +1,4 @@
 import os, time, asyncio, subprocess, pysubs2
-import google.generativeai as genai
 from pyrogram import Client
 from faster_whisper import WhisperModel
 import pyrogram.utils
@@ -10,11 +9,6 @@ API_ID, API_HASH, BOT_TOKEN = int(os.getenv("API_ID")), os.getenv("API_HASH"), o
 TASK_TYPE, FILE_ID, FORMAT_TYPE = os.getenv("TASK_TYPE"), os.getenv("FILE_ID"), os.getenv("FORMAT_TYPE")
 CHAT_ID, MSG_ID = int(os.getenv("CHAT_ID")), int(os.getenv("MSG_ID"))
 FILE_NAME, STYLE_TYPE = os.getenv("FILE_NAME", "sub"), os.getenv("STYLE_TYPE", "normal")
-CUSTOM_PROMPT = os.getenv("CUSTOM_PROMPT", "none")
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "AIzaSyDcmpYpYI2RuntCa-ZNkuuE-u2uZFaqvQQ")
-genai.configure(api_key=GEMINI_API_KEY)
-ai_model = genai.GenerativeModel('gemini-1.5-flash')
 
 app, last_time, start_time = None, 0, 0
 
@@ -91,72 +85,6 @@ def p_eng(vp):
     if FORMAT_TYPE == "ass" and STYLE_TYPE == "asi_style": apply_asi(out)
     return out
 
-def translate_with_gemini(texts):
-    base_rules = """Translate the following subtitle lines into natural, conversational WhatsApp-style Hinglish.
-RULES:
-1. Translate the Hindi/English dialogue into natural Hinglish (conversational WhatsApp style).
-2. Maintain the exact sequence mapping 'Index|||text'. Output must strictly be formatted as: Index|||TranslatedText
-3. Do not drop or miss any index numbers.
-4. Keep all formatting tags like {\\i1} or \\N as they are."""
-
-    prompt = base_rules
-    if CUSTOM_PROMPT != "none": prompt = f"{CUSTOM_PROMPT}\n\n{prompt}"
-    
-    formatted_text = "\n".join([f"{i}|||{txt}" for i, txt in enumerate(texts)])
-    full_prompt = f"{prompt}\n\nTEXT TO TRANSLATE:\n{formatted_text}"
-    
-    try:
-        response = ai_model.generate_content(full_prompt)
-        res_lines = response.text.strip().split('\n')
-        
-        translated_dict = {}
-        for line in res_lines:
-            if "|||" in line:
-                parts = line.split("|||", 1)
-                try:
-                    clean_idx = "".join(filter(str.isdigit, parts[0]))
-                    if clean_idx:
-                        translated_dict[int(clean_idx)] = parts[1].strip()
-                except: pass
-                
-        final_texts = []
-        for i in range(len(texts)):
-            val = translated_dict.get(i, texts[i])
-            if not val or val.strip() == "":
-                val = texts[i]
-            final_texts.append(val)
-        return final_texts
-    except Exception as e:
-        print("Gemini Error:", e)
-        return texts
-
-def p_hi(sp):
-    subs = pysubs2.load(sp)
-    
-    texts_to_translate = []
-    valid_indices = []
-    
-    for i, l in enumerate(subs):
-        if l.text.strip(): 
-            texts_to_translate.append(l.text.strip())
-            valid_indices.append(i)
-            
-    if texts_to_translate:
-        # Safe batching of 40 lines to prevent Gemini timeouts or dropped sentences
-        batch_size = 40
-        for i in range(0, len(texts_to_translate), batch_size):
-            batch_texts = texts_to_translate[i:i+batch_size]
-            translated_batch = translate_with_gemini(batch_texts)
-            
-            for j, translated_txt in enumerate(translated_batch):
-                if j < len(batch_texts):
-                    subs[valid_indices[i+j]].text = translated_txt
-
-    out = f"{FILE_NAME}_Hinglish.{FORMAT_TYPE}"
-    subs.save(out)
-    if FORMAT_TYPE == "ass" and STYLE_TYPE == "asi_style": apply_asi(out)
-    return out
-
 async def main():
     global app
     app = Client("ws", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, in_memory=True)
@@ -166,19 +94,13 @@ async def main():
         reset_prog()
         fp = await app.download_media(FILE_ID, progress=prog, progress_args=("📥 Downloading Video...",))
         
-        # Complete corrupt check
         if not fp or not os.path.exists(fp) or os.path.getsize(fp) < 1000:
             raise Exception("❌ Telegram side download error! Downloaded file is empty.")
 
         loop = asyncio.get_event_loop()
-        if TASK_TYPE == "extract_english":
-            await app.edit_message_text(CHAT_ID, MSG_ID, "⚙️ Generating English AI Subtitle...")
-            out = await loop.run_in_executor(None, p_eng, fp)
-            cap = f"✅ English Subtitle: `{FILE_NAME}.{FORMAT_TYPE}`"
-        else:
-            await app.edit_message_text(CHAT_ID, MSG_ID, "🤖 Translating via Gemini AI...")
-            out = await loop.run_in_executor(None, p_hi, fp)
-            cap = f"✅ AI Hinglish Subtitle: `{FILE_NAME}_Hinglish.{FORMAT_TYPE}`"
+        await app.edit_message_text(CHAT_ID, MSG_ID, "⚙️ Generating English AI Subtitle...")
+        out = await loop.run_in_executor(None, p_eng, fp)
+        cap = f"✅ English Subtitle: `{FILE_NAME}.{FORMAT_TYPE}`"
             
         reset_prog()
         await app.send_document(CHAT_ID, document=out, caption=cap, reply_to_message_id=MSG_ID, progress=prog, progress_args=("📤 Uploading...",))
