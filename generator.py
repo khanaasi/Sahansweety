@@ -1,4 +1,4 @@
-import os, time, asyncio, subprocess, pysubs2
+import os, time, asyncio, re, subprocess, pysubs2
 from pyrogram import Client
 from faster_whisper import WhisperModel
 import pyrogram.utils
@@ -47,6 +47,12 @@ async def prog(c, t, action):
     except Exception as e:
         print("Progress callback error:", e)
 
+def clean_srt_tags(text):
+    """Strip all HTML and ASS formatting styles."""
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'{[^}]+}', '', text)
+    return text.strip()
+
 def apply_asi(fp):
     subs = pysubs2.load(fp)
     if not subs: return
@@ -70,7 +76,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 10,0:00:00.00,9:59:59.99,ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,0000,,{{\\bord8\\blur5\\shad3}} {{\\c&HFF00FF&}}𝙰{{\\c&HFFFFFF&}}𝚂{{\\c&H00A0FF&}}𝙸☠
 """
     def mt(ms): return f"{ms//3600000}:{(ms%3600000)//60000:02d}:{(ms%60000)//1000:02d}.{(ms%1000)//10:02d}"
-    for l in subs: ass += f"Dialogue: 0,{mt(l.start)},{mt(l.end)},Default,,0000,0000,0000,,{l.text.replace(chr(10), '\\N')}\n"
+    for l in subs:
+        cleaned_txt = clean_srt_tags(l.text)
+        ass += f"Dialogue: 0,{mt(l.start)},{mt(l.end)},Default,,0000,0000,0000,,{cleaned_txt.replace(chr(10), '\\N')}\n"
     with open(fp, "w", encoding="utf-8") as f: f.write(ass)
 
 def p_eng(vp):
@@ -79,7 +87,10 @@ def p_eng(vp):
     segs, _ = m.transcribe("a.wav", task="translate", vad_filter=True)
     subs = pysubs2.SSAFile()
     for s in segs:
-        if s.text: subs.append(pysubs2.SSAEvent(start=int(s.start*1000), end=int(s.end*1000), text=s.text.strip()))
+        if s.text:
+            cleaned_text = clean_srt_tags(s.text)
+            if cleaned_text:
+                subs.append(pysubs2.SSAEvent(start=int(s.start*1000), end=int(s.end*1000), text=cleaned_text))
     out = f"{FILE_NAME}.{FORMAT_TYPE}"
     subs.save(out)
     if FORMAT_TYPE == "ass" and STYLE_TYPE == "asi_style": apply_asi(out)
