@@ -142,12 +142,32 @@ Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,00
         f.write(styled_ass)
     return output_path
 
-# ================= STAGE 1: DOWNLOAD =================
+# ================= STAGE 1: DOWNLOAD (WITH AUTO RETRY) =================
 async def dl(app):
+    # Workspace cleanup at start to avoid file corruption
+    for temp_f in ["video.mp4", "out.mp4", "extracted_softsub.srt", "styled_subtitle.ass", "wm.png"]:
+        if os.path.exists(temp_f):
+            try: os.remove(temp_f)
+            except: pass
+
     st = await app.send_message(CHAT_ID, "⚙️ Worker: Preparing Download...")
     
-    reset_prog()
-    v = await app.download_media(VIDEO_ID, file_name="video.mp4", progress=prog, progress_args=(app, st.id, "📥 Video..."))
+    # Auto-retry download logic (Prevents prematurely ended files on network fluctuations)
+    v = None
+    for attempt in range(2):
+        reset_prog()
+        try:
+            if os.path.exists("video.mp4"):
+                try: os.remove("video.mp4")
+                except: pass
+                
+            v = await app.download_media(VIDEO_ID, file_name="video.mp4", progress=prog, progress_args=(app, st.id, f"📥 Video (Attempt {attempt+1})..."))
+            # If successfully downloaded and greater than 50 KB, proceed
+            if v and os.path.exists(v) and os.path.getsize(v) > 50000:
+                break
+        except Exception as e:
+            print(f"Download attempt {attempt+1} failed: {e}")
+            await asyncio.sleep(5)
     
     if not v or not os.path.exists(v) or os.path.getsize(v) < 1000:
         raise Exception("❌ Telegram side download error! Downloaded file is empty or corrupted.")
@@ -215,13 +235,14 @@ async def enc(app, v, s, w, mid):
                 extracted_sub = None
         
     elif TASK_TYPE == "extract": 
+        await app.edit_message_text(CHAT_ID, mid, "⚙️ Worker: Extracting Subtitle...")
         out = "extracted_sub.srt"
         cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "copy", out] 
     
-    # Live task dynamic status (Compressing Video / Encoding Hardsub)
+    # Dynamic status bar: Compressing Video vs Encoding Hardsub
     status_text = "Compressing Video" if TASK_TYPE == "resize" else "Encoding Hardsub"
     
-    # 100% original speed progress pipeline
+    # FFmpeg processing live loop (Puri Tarah purani untitled 02 speed ke sath)
     cmd_with_progress = cmd[:-1] + ["-progress", "pipe:1", "-nostats"] + [cmd[-1]]
     process = await asyncio.create_subprocess_exec(
         *cmd_with_progress,
@@ -296,7 +317,7 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
             progress_args=(app, mid, "📤 Uploading Video...")
         )
         
-        # Softsub extension set back to pure .srt format (No .txt)
+        # Softsub extension back to .srt as requested
         if extracted_sub and os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
             sub_name = file_name.rsplit(".", 1)[0] + ".srt"
             try:
