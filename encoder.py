@@ -34,6 +34,7 @@ async def prog(c, t, app, mid, action):
             speed = c / elapsed if elapsed > 0 else 0
             speed_mb = speed / 1048576
             percentage = (c / t) * 100 if t and t > 0 else 0
+            # 10 blocks graphic progress bar
             bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
             
             try: 
@@ -273,9 +274,9 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
             progress_args=(app, mid, "📤 Uploading Video...")
         )
         
-        # If soft subtitle was extracted, send it right after the video
+        # FIX: .srt se badalkar .txt extension kiya gaya hai
         if extracted_sub and os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
-            sub_name = file_name.rsplit(".", 1)[0] + ".srt"
+            sub_name = file_name.rsplit(".", 1)[0] + ".txt"
             try:
                 os.rename(extracted_sub, sub_name)
                 await app.send_document(
