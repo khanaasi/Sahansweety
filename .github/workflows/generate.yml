@@ -1,5 +1,9 @@
 name: Subtitle Generator Workflow
 
+concurrency:
+  group: generate-workflow-group
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
