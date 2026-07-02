@@ -13,30 +13,29 @@ WM_POS, RENAME = os.getenv("WM_POS"), os.getenv("RENAME")
 
 last_time = 0
 start_time = 0
+first_edit = True
 
 def reset_prog():
-    global last_time, start_time
+    global last_time, start_time, first_edit
     last_time = time.time()
     start_time = time.time()
+    first_edit = True
 
-# --- UNIQUE PROGRESS BAR GENERATOR (Outside formatting tags to avoid offset bugs) ---
+# --- UNIQUE PROGRESS BAR GENERATOR ---
 def get_progress_bar(percentage, style="block"):
     percentage = max(0.0, min(100.0, percentage))
     total_steps = 15
     filled = int(round((percentage / 100.0) * total_steps))
     
     if style == "block":
-        # Downloading Style: [▰▰▰▱▱▱▱▱▱]
         return "▰" * filled + "▱" * (total_steps - filled)
         
     elif style == "dot":
-        # Processing Style: [°•°•°•-------------]
         filled_str = "".join("°" if i % 2 == 0 else "•" for i in range(filled))
         empty_str = "-" * (total_steps - filled)
         return filled_str + empty_str
         
     elif style == "heartbeat":
-        # Left-To-Right Moving Heart Fire Pulse frames (Strictly pre-arranged to prevent alignment bugs)
         frames = [
             "\u200e❤️‍🔥\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 0% - 9%
             "ﮩ٨ـ\u200e❤️‍🔥\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 10% - 19%
@@ -58,7 +57,7 @@ def get_progress_bar(percentage, style="block"):
 
 # --- PROGRESS DISPATCHER ---
 async def prog(c, t, app, mid, action):
-    global last_time, start_time
+    global last_time, start_time, first_edit
     try:
         now = time.time()
         if start_time == 0:
@@ -66,18 +65,17 @@ async def prog(c, t, app, mid, action):
             last_time = now
             return
             
-        # Strictly limit edits to 10 seconds interval to optimize download/upload speed
-        if now - last_time > 10 or c == t:
+        # First edit logic instant visual notification ke liye, aur baki ke 10 seconds interval par
+        if first_edit or now - last_time > 10 or c == t:
+            first_edit = False
+            last_time = now
             elapsed = now - start_time
             speed = c / elapsed if elapsed > 0 else 0
             speed_mb = speed / 1048576
             percentage = (c / t) * 100 if t and t > 0 else 0
             
-            # Action base bar design matching (Downloading vs Uploading)
             style_type = "block" if "📥" in action else "heartbeat"
             bar = get_progress_bar(percentage, style_type)
-            
-            # HTML Escape to protect parsed text from entity bounds errors
             escaped_action = html.escape(action)
             
             try: 
@@ -92,9 +90,19 @@ async def prog(c, t, app, mid, action):
                 )
             except Exception as e: 
                 print("Telegram progress update error:", e)
-            last_time = now
     except Exception as e:
         print("Uncaught exception in progress bar:", e)
+
+# --- CONTEXTUAL DOWNLOAD HELPER (PEER / CHAT ERROR RESOLVER) ---
+async def download_helper(app, input_id, file_name=None, progress=None, progress_args=None):
+    try:
+        # Agar input_id number hai, toh matlab wo Message ID hai, message fetch karke download karein
+        msg_id = int(input_id)
+        msg = await app.get_messages(CHAT_ID, msg_id)
+        return await msg.download(file_name=file_name, progress=progress, progress_args=progress_args)
+    except ValueError:
+        # Agar string hai, toh direct file_id download karein
+        return await app.download_media(input_id, file_name=file_name, progress=progress, progress_args=progress_args)
 
 # --- FFPROBE HELPERS ---
 def get_duration(file_path):
@@ -156,7 +164,7 @@ Style: Logo,Arial,30,&H00FFFFFF,&H00FFFFFF,&H000000FF,&H96000000,0,0,0,0,100,100
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,0000,,{{\\bord8\\blur5\\shad3}} {{\\c&HFF00FF&}}𝙰{{\\c&HFFFFFF&}}𝚂{{\\c&H00A0FF&}}𝙸☠
+Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪ_Watermark,,0000,0000,0000,,{{\\bord8\\blur5\\shad3}} {{\\c&HFF00FF&}}𝙰{{\\c&HFFFFFF&}}𝚂{{\\c&H00A0FF&}}𝙸☠
 """
 
     def mt(ms):
@@ -194,7 +202,10 @@ async def dl(app):
                 try: os.remove("video.mp4")
                 except: pass
                 
-            v = await app.download_media(VIDEO_ID, file_name="video.mp4", progress=prog, progress_args=(app, st.id, f"📥 Downloading Video (Attempt {attempt+1})..."))
+            v = await download_helper(
+                app, VIDEO_ID, file_name="video.mp4", 
+                progress=prog, progress_args=(app, st.id, f"📥 Downloading Video (Attempt {attempt+1})...")
+            )
             if v and os.path.exists(v) and os.path.getsize(v) > 50000:
                 break
         except Exception as e:
@@ -207,10 +218,16 @@ async def dl(app):
     s, w = None, None
     if TASK_TYPE == "hsub":
         reset_prog()
-        s = await app.download_media(SUB_ID, progress=prog, progress_args=(app, st.id, "📥 Downloading Subtitle..."))
+        s = await download_helper(
+            app, SUB_ID, 
+            progress=prog, progress_args=(app, st.id, "📥 Downloading Subtitle...")
+        )
         if WM_ID != "none": 
             reset_prog()
-            w = await app.download_media(WM_ID, file_name="wm.png", progress=prog, progress_args=(app, st.id, "📥 Downloading Watermark..."))
+            w = await download_helper(
+                app, WM_ID, file_name="wm.png", 
+                progress=prog, progress_args=(app, st.id, "📥 Downloading Watermark...")
+            )
             
     await app.edit_message_text(CHAT_ID, st.id, "🔥 **Worker: Processing Started!**")
     return v, s, w, st.id
@@ -255,7 +272,6 @@ async def enc(app, v, s, w, mid):
             subprocess.run(ext_cmd, capture_output=True)
             if os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
                 try:
-                    # Parse and clean SRT text perfectly
                     tmp_subs = pysubs2.load(extracted_sub)
                     for line in tmp_subs:
                         line.text = clean_srt_tags(line.text)
@@ -306,7 +322,6 @@ async def enc(app, v, s, w, mid):
                 speed = line_str.split("=")[1].strip()
             elif "progress=" in line_str:
                 now = time.time()
-                # Status bar rate limit to ensure fast process execution
                 if now - last_update > 10 or line_str.endswith("end"):
                     bar = get_progress_bar(percentage, "dot")
                     escaped_speed = html.escape(speed)
@@ -341,7 +356,6 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
         reset_prog()
         file_name = os.path.basename(out)
         
-        # Uploading compressed video
         await app.send_document(
             CHAT_ID, 
             document=out, 
@@ -351,7 +365,6 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
             progress_args=(app, mid, "📤 Uploading Video...")
         )
         
-        # Send clean soft subtitle alongside the video with matching names as requested
         if extracted_sub and os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
             sub_name = file_name.rsplit(".", 1)[0] + ".srt"
             try:
@@ -375,16 +388,39 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
             parse_mode="html"
         )
 
-# ================= MASTER CONTROLLER =================
+# ================= RUN MASTER WITH DETAILED EXCEPTION REPORTER =================
 async def main():
     app = Client("w_master", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
     
-    v, s, w, mid = await dl(app)
-    out, rc, err, extracted_sub = await enc(app, v, s, w, mid)
-    await up(app, out, rc, err, mid, extracted_sub)
-    
-    await app.stop()
+    st_id = None
+    try:
+        v, s, w, mid = await dl(app)
+        st_id = mid
+        out, rc, err, extracted_sub = await enc(app, v, s, w, mid)
+        await up(app, out, rc, err, mid, extracted_sub)
+    except Exception as e:
+        import traceback
+        error_tb = traceback.format_exc()
+        print(error_tb)
+        try:
+            target_mid = st_id if st_id else None
+            if target_mid:
+                await app.edit_message_text(
+                    CHAT_ID, target_mid,
+                    f"❌ <b>Worker Crash Error:</b>\n<code>{html.escape(str(e))}</code>",
+                    parse_mode="html"
+                )
+            else:
+                await app.send_message(
+                    CHAT_ID,
+                    f"❌ <b>Worker Crash Error:</b>\n<code>{html.escape(str(e))}</code>",
+                    parse_mode="html"
+                )
+        except Exception as ex:
+            print("Failed to send crash traceback to Telegram:", ex)
+    finally:
+        await app.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
