@@ -14,12 +14,17 @@ WM_POS, RENAME = os.getenv("WM_POS"), os.getenv("RENAME")
 last_time = 0
 start_time = 0
 first_edit = True
+status_msg_id = None  # Global status message tracker for fail-proof editing
 
 def reset_prog():
     global last_time, start_time, first_edit
     last_time = time.time()
     start_time = time.time()
     first_edit = True
+
+# --- CANCEL KEYBOARD HELPER ---
+def get_cancel_markup():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_action_run")]])
 
 # --- UNIQUE PROGRESS BAR GENERATOR ---
 def get_progress_bar(percentage, style="block"):
@@ -37,17 +42,17 @@ def get_progress_bar(percentage, style="block"):
         
     elif style == "heartbeat":
         frames = [
-            "\u200e❤️‍🔥\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 0% - 9%
-            "ﮩ٨ـ\u200e❤️‍🔥\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 10% - 19%
-            "ﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200e٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 20% - 29%
-            "ﮩ٨ـ\u200eﮩﮩ\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 30% - 39%
-            "ﮩ٨ـ\u200eﮩﮩ٨\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 40% - 49%
-            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200e٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 50% - 59%
-            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨\u200e❤️‍🔥\u200eـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 60% - 69%
-            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200eﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 70% - 79%
-            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 80% - 89%
-            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ", # 90% - 94%
-            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200e", # 95% - 100%
+            "\u200e❤️‍🔥\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200e❤️‍🔥\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200e٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200eﮩﮩ\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200eﮩﮩ٨\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200e٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨\u200e❤️‍🔥\u200eـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200eﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ", 
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200e", 
         ]
         idx = int(percentage / 10)
         idx = max(0, min(10, idx))
@@ -65,7 +70,6 @@ async def prog(c, t, app, mid, action):
             last_time = now
             return
             
-        # First edit logic instant visual notification ke liye, aur baki ke 10 seconds interval par
         if first_edit or now - last_time > 10 or c == t:
             first_edit = False
             last_time = now
@@ -86,22 +90,20 @@ async def prog(c, t, app, mid, action):
                     f"📦 <code>{c/1048576:.1f}MB / {t/1048576:.1f}MB</code>\n"
                     f"⚡ <b>Speed:</b> <code>{speed_mb:.2f} MB/s</code>",
                     parse_mode="html",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_action_run")]])
+                    reply_markup=get_cancel_markup()
                 )
             except Exception as e: 
                 print("Telegram progress update error:", e)
     except Exception as e:
         print("Uncaught exception in progress bar:", e)
 
-# --- CONTEXTUAL DOWNLOAD HELPER (PEER / CHAT ERROR RESOLVER) ---
+# --- CONTEXTUAL DOWNLOAD HELPER ---
 async def download_helper(app, input_id, file_name=None, progress=None, progress_args=None):
     try:
-        # Agar input_id number hai, toh matlab wo Message ID hai, message fetch karke download karein
         msg_id = int(input_id)
         msg = await app.get_messages(CHAT_ID, msg_id)
         return await msg.download(file_name=file_name, progress=progress, progress_args=progress_args)
     except ValueError:
-        # Agar string hai, toh direct file_id download karein
         return await app.download_media(input_id, file_name=file_name, progress=progress, progress_args=progress_args)
 
 # --- FFPROBE HELPERS ---
@@ -164,7 +166,7 @@ Style: Logo,Arial,30,&H00FFFFFF,&H00FFFFFF,&H000000FF,&H96000000,0,0,0,0,100,100
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪ_Watermark,,0000,0000,0000,,{{\\bord8\\blur5\\shad3}} {{\\c&HFF00FF&}}𝙰{{\\c&HFFFFFF&}}𝚂{{\\c&H00A0FF&}}𝙸☠
+Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,0000,,{{\\bord8\\blur5\\shad3}} {{\\c&HFF00FF&}}𝙰{{\\c&HFFFFFF&}}𝚂{{\\c&H00A0FF&}}𝙸☠
 """
 
     def mt(ms):
@@ -187,12 +189,19 @@ Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪ_Watermark,,0000,0000,0000,,{{
 
 # ================= DOWNLOAD STAGE =================
 async def dl(app):
+    global status_msg_id
     for temp_f in ["video.mp4", "out.mp4", "extracted_softsub.srt", "styled_subtitle.ass", "wm.png"]:
         if os.path.exists(temp_f):
             try: os.remove(temp_f)
             except: pass
 
-    st = await app.send_message(CHAT_ID, "⚙️ Worker: Preparing Download...")
+    # Preparing Download status par bhi Cancel keyboard link kiya
+    st = await app.send_message(
+        CHAT_ID, 
+        "⚙️ Worker: Preparing Download...",
+        reply_markup=get_cancel_markup()
+    )
+    status_msg_id = st.id
     
     v = None
     for attempt in range(2):
@@ -229,7 +238,11 @@ async def dl(app):
                 progress=prog, progress_args=(app, st.id, "📥 Downloading Watermark...")
             )
             
-    await app.edit_message_text(CHAT_ID, st.id, "🔥 **Worker: Processing Started!**")
+    await app.edit_message_text(
+        CHAT_ID, st.id, 
+        "🔥 **Worker: Processing Started!**",
+        reply_markup=get_cancel_markup()
+    )
     return v, s, w, st.id
 
 # ================= ENCODE & CONVERT STAGE =================
@@ -242,7 +255,11 @@ async def enc(app, v, s, w, mid):
     extracted_sub = None
     
     if TASK_TYPE == "hsub":
-        await app.edit_message_text(CHAT_ID, mid, "⚙️ Worker: Encoding Hardsub...")
+        await app.edit_message_text(
+            CHAT_ID, mid, 
+            "⚙️ Worker: Encoding Hardsub...",
+            reply_markup=get_cancel_markup()
+        )
         styled_sub_path = convert_and_style_sub(s, duration)
         sub = os.path.abspath(styled_sub_path).replace('\\', '/')
         
@@ -257,14 +274,17 @@ async def enc(app, v, s, w, mid):
             cmd = ["ffmpeg", "-y", "-i", v, "-vf", v_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out]
             
     elif TASK_TYPE == "resize": 
-        await app.edit_message_text(CHAT_ID, mid, "⚙️ Worker: Compressing Video & Subtitle extraction...")
+        await app.edit_message_text(
+            CHAT_ID, mid, 
+            "⚙️ Worker: Compressing Video & Subtitle extraction...",
+            reply_markup=get_cancel_markup()
+        )
         if valid_res:
             scale_filter = f"scale=-2:{RESO}"
         else:
             scale_filter = "scale='trunc(iw/2)*2:trunc(ih/2)*2'"
         cmd = ["ffmpeg", "-y", "-i", v, "-vf", scale_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out]
         
-        # Soft-subtitle checking and extracting as requested
         sub_streams = get_subtitle_streams(v)
         if sub_streams:
             extracted_sub = "extracted_softsub.srt"
@@ -282,7 +302,11 @@ async def enc(app, v, s, w, mid):
                 extracted_sub = None
         
     elif TASK_TYPE == "extract": 
-        await app.edit_message_text(CHAT_ID, mid, "⚙️ Worker: Extracting Subtitle...")
+        await app.edit_message_text(
+            CHAT_ID, mid, 
+            "⚙️ Worker: Extracting Subtitle...",
+            reply_markup=get_cancel_markup()
+        )
         out = "extracted_sub.srt"
         cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "copy", out] 
     
@@ -332,7 +356,7 @@ async def enc(app, v, s, w, mid):
                             f"📊 <b>[{bar}] {percentage:.2f}%</b>\n"
                             f"🚀 <b>Speed:</b> <code>{escaped_speed}</code>",
                             parse_mode="html",
-                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_action_run")]])
+                            reply_markup=get_cancel_markup()
                         )
                     except:
                         pass
@@ -388,15 +412,14 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
             parse_mode="html"
         )
 
-# ================= RUN MASTER WITH DETAILED EXCEPTION REPORTER =================
+# ================= RUN MASTER WITH FAIL-SAFE EXCEPTION EDITS =================
 async def main():
+    global status_msg_id
     app = Client("w_master", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
     
-    st_id = None
     try:
         v, s, w, mid = await dl(app)
-        st_id = mid
         out, rc, err, extracted_sub = await enc(app, v, s, w, mid)
         await up(app, out, rc, err, mid, extracted_sub)
     except Exception as e:
@@ -404,18 +427,20 @@ async def main():
         error_tb = traceback.format_exc()
         print(error_tb)
         try:
-            target_mid = st_id if st_id else None
-            if target_mid:
+            # Agar crash pehle stage me hua, toh naya msg bhejne ke bajay usi ko edit karega
+            if status_msg_id:
                 await app.edit_message_text(
-                    CHAT_ID, target_mid,
+                    CHAT_ID, status_msg_id,
                     f"❌ <b>Worker Crash Error:</b>\n<code>{html.escape(str(e))}</code>",
-                    parse_mode="html"
+                    parse_mode="html",
+                    reply_markup=get_cancel_markup()
                 )
             else:
                 await app.send_message(
                     CHAT_ID,
                     f"❌ <b>Worker Crash Error:</b>\n<code>{html.escape(str(e))}</code>",
-                    parse_mode="html"
+                    parse_mode="html",
+                    reply_markup=get_cancel_markup()
                 )
         except Exception as ex:
             print("Failed to send crash traceback to Telegram:", ex)
