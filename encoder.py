@@ -1,4 +1,4 @@
-import os, sys, time, asyncio, re, subprocess, pyrogram.utils, pysubs2
+import os, sys, time, asyncio, re, subprocess, pyrogram.utils, pysubs2, html
 from pyrogram import Client
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -19,7 +19,7 @@ def reset_prog():
     last_time = time.time()
     start_time = time.time()
 
-# --- UNIQUE PROGRESS BAR GENERATOR ---
+# --- UNIQUE PROGRESS BAR GENERATOR (Outside formatting tags to avoid offset bugs) ---
 def get_progress_bar(percentage, style="block"):
     percentage = max(0.0, min(100.0, percentage))
     total_steps = 15
@@ -36,7 +36,7 @@ def get_progress_bar(percentage, style="block"):
         return filled_str + empty_str
         
     elif style == "heartbeat":
-        # Left-To-Right Moving Heart Fire Pulse frames (Fixes Telegram RTL bugs)
+        # Left-To-Right Moving Heart Fire Pulse frames (Strictly pre-arranged to prevent alignment bugs)
         frames = [
             "\u200e❤️‍🔥\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 0% - 9%
             "ﮩ٨ـ\u200e❤️‍🔥\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 10% - 19%
@@ -73,17 +73,21 @@ async def prog(c, t, app, mid, action):
             speed_mb = speed / 1048576
             percentage = (c / t) * 100 if t and t > 0 else 0
             
-            # Action type par base unique design apply karein
+            # Action base bar design matching (Downloading vs Uploading)
             style_type = "block" if "📥" in action else "heartbeat"
             bar = get_progress_bar(percentage, style_type)
+            
+            # HTML Escape to protect parsed text from entity bounds errors
+            escaped_action = html.escape(action)
             
             try: 
                 await app.edit_message_text(
                     CHAT_ID, mid, 
-                    f"▸ **Status:** {action}\n"
-                    f"📊 `[{bar}] {percentage:.2f}%`\n"
-                    f"📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`\n"
-                    f"⚡ **Speed:** `{speed_mb:.2f} MB/s`",
+                    f"▸ <b>Status:</b> {escaped_action}\n"
+                    f"📊 <b>[{bar}] {percentage:.2f}%</b>\n"
+                    f"📦 <code>{c/1048576:.1f}MB / {t/1048576:.1f}MB</code>\n"
+                    f"⚡ <b>Speed:</b> <code>{speed_mb:.2f} MB/s</code>",
+                    parse_mode="html",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_action_run")]])
                 )
             except Exception as e: 
@@ -112,9 +116,7 @@ def get_subtitle_streams(file_path):
 
 # --- CLEAN SRT TAGS PARSER ---
 def clean_srt_tags(text):
-    # 1. Clean HTML styles
     text = re.sub(r'<[^>]+>', '', text)
-    # 2. Clean ASS script codes
     text = re.sub(r'{[^}]+}', '', text)
     return text.strip()
 
@@ -269,6 +271,7 @@ async def enc(app, v, s, w, mid):
         cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "copy", out] 
     
     status_text = "Compressing Video" if TASK_TYPE == "resize" else "Encoding Hardsub"
+    escaped_status = html.escape(status_text)
     
     cmd_with_progress = cmd[:-1] + ["-progress", "pipe:1", "-nostats"] + [cmd[-1]]
     process = await asyncio.create_subprocess_exec(
@@ -306,12 +309,14 @@ async def enc(app, v, s, w, mid):
                 # Status bar rate limit to ensure fast process execution
                 if now - last_update > 10 or line_str.endswith("end"):
                     bar = get_progress_bar(percentage, "dot")
+                    escaped_speed = html.escape(speed)
                     try:
                         await app.edit_message_text(
                             CHAT_ID, mid,
-                            f"▸ **Status:** {status_text}...\n"
-                            f"📊 `[{bar}] {percentage:.2f}%`\n"
-                            f"🚀 **Speed:** `{speed}`",
+                            f"▸ <b>Status:</b> {escaped_status}...\n"
+                            f"📊 <b>[{bar}] {percentage:.2f}%</b>\n"
+                            f"🚀 <b>Speed:</b> <code>{escaped_speed}</code>",
+                            parse_mode="html",
                             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_action_run")]])
                         )
                     except:
@@ -340,7 +345,8 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
         await app.send_document(
             CHAT_ID, 
             document=out, 
-            caption=f"✅ **{file_name}**", 
+            caption=f"✅ <b>{html.escape(file_name)}</b>", 
+            parse_mode="html",
             progress=prog, 
             progress_args=(app, mid, "📤 Uploading Video...")
         )
@@ -353,14 +359,21 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
                 await app.send_document(
                     CHAT_ID, 
                     document=sub_name, 
-                    caption=f"📄 **Extracted Soft Subtitle:** `{sub_name}`"
+                    caption=f"📄 <b>Extracted Soft Subtitle:</b> <code>{html.escape(sub_name)}</code>",
+                    parse_mode="html"
                 )
             except Exception as e:
                 print("Error uploading extracted soft subtitle:", e)
                 
         await app.delete_messages(CHAT_ID, mid)
     else: 
-        await app.edit_message_text(CHAT_ID, mid, f"❌ **Error:** `{err[-500:] if err else 'FFmpeg Error or Empty output'}`")
+        err_msg = err[-500:] if err else 'FFmpeg Error or Empty output'
+        await app.edit_message_text(
+            CHAT_ID, 
+            mid, 
+            f"❌ <b>Error:</b> <code>{html.escape(err_msg)}</code>", 
+            parse_mode="html"
+        )
 
 # ================= MASTER CONTROLLER =================
 async def main():
