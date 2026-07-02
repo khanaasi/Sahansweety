@@ -1,9 +1,5 @@
 name: Video Encoder Workflow
 
-concurrency:
-  group: encode-workflow-group
-  cancel-in-progress: false
-
 on:
   workflow_dispatch:
     inputs:
