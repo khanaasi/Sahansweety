@@ -2,7 +2,7 @@ import os, sys, time, asyncio, re, subprocess, pyrogram.utils, pysubs2
 from pyrogram import Client
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Pyrogram ID bug fix (Strictly from your commit)
+# Pyrogram ID compatibility patch
 pyrogram.utils.get_peer_type = lambda p: "channel" if str(p).startswith("-100") else "chat" if str(p).startswith("-") else "user"
 
 # --- ENV VARIABLES ---
@@ -14,13 +14,49 @@ WM_POS, RENAME = os.getenv("WM_POS"), os.getenv("RENAME")
 last_time = 0
 start_time = 0
 
-# Progress details ko dynamic and clean reset karne ke liye helper
 def reset_prog():
     global last_time, start_time
     last_time = time.time()
     start_time = time.time()
 
-# --- PROGRESS BAR (Speed, Size and Graphic Blocks - Error Free) ---
+# --- UNIQUE PROGRESS BAR GENERATOR ---
+def get_progress_bar(percentage, style="block"):
+    percentage = max(0.0, min(100.0, percentage))
+    total_steps = 15
+    filled = int(round((percentage / 100.0) * total_steps))
+    
+    if style == "block":
+        # Downloading Style: [▰▰▰▱▱▱▱▱▱]
+        return "▰" * filled + "▱" * (total_steps - filled)
+        
+    elif style == "dot":
+        # Processing Style: [°•°•°•-------------]
+        filled_str = "".join("°" if i % 2 == 0 else "•" for i in range(filled))
+        empty_str = "-" * (total_steps - filled)
+        return filled_str + empty_str
+        
+    elif style == "heartbeat":
+        # Left-To-Right Moving Heart Fire Pulse frames (Fixes Telegram RTL bugs)
+        frames = [
+            "\u200e❤️‍🔥\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 0% - 9%
+            "ﮩ٨ـ\u200e❤️‍🔥\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 10% - 19%
+            "ﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200e٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 20% - 29%
+            "ﮩ٨ـ\u200eﮩﮩ\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 30% - 39%
+            "ﮩ٨ـ\u200eﮩﮩ٨\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 40% - 49%
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200e٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 50% - 59%
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨\u200e❤️‍🔥\u200eـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 60% - 69%
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200eﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 70% - 79%
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ\u200eﮩ٨ـ", # 80% - 89%
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200eـ\u200eﮩ٨ـ", # 90% - 94%
+            "ﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ\u200e❤️‍🔥\u200e", # 95% - 100%
+        ]
+        idx = int(percentage / 10)
+        idx = max(0, min(10, idx))
+        return frames[idx]
+        
+    return "■" * filled + "□" * (total_steps - filled)
+
+# --- PROGRESS DISPATCHER ---
 async def prog(c, t, app, mid, action):
     global last_time, start_time
     try:
@@ -30,12 +66,16 @@ async def prog(c, t, app, mid, action):
             last_time = now
             return
             
+        # Strictly limit edits to 10 seconds interval to optimize download/upload speed
         if now - last_time > 10 or c == t:
             elapsed = now - start_time
             speed = c / elapsed if elapsed > 0 else 0
             speed_mb = speed / 1048576
             percentage = (c / t) * 100 if t and t > 0 else 0
-            bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
+            
+            # Action type par base unique design apply karein
+            style_type = "block" if "📥" in action else "heartbeat"
+            bar = get_progress_bar(percentage, style_type)
             
             try: 
                 await app.edit_message_text(
@@ -58,31 +98,26 @@ def get_duration(file_path):
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return float(res.stdout.strip())
-    except Exception as e:
-        print("FFprobe duration error:", e)
+    except:
         return 0.0
 
 def get_subtitle_streams(file_path):
-    """Checks if the video has soft subtitles embedded in it."""
     cmd = ["ffprobe", "-v", "error", "-select_streams", "s", "-show_entries", "stream=index", "-of", "csv=p=0", file_path]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, check=True)
         streams = res.stdout.strip().split('\n')
         return [s.strip() for s in streams if s.strip()]
-    except Exception as e:
-        print("FFprobe subtitle stream error:", e)
+    except:
         return []
 
-# --- SRT SUBTITLE CLEANER (Formatting Strip) ---
+# --- CLEAN SRT TAGS PARSER ---
 def clean_srt_tags(text):
-    """HTML tag size and ASS formatting remove logic."""
-    # Strip HTML tags (<font>, <b>, <i> etc.)
+    # 1. Clean HTML styles
     text = re.sub(r'<[^>]+>', '', text)
-    # Strip ASS parameters ({\an2}, {\pos...} etc.)
+    # 2. Clean ASS script codes
     text = re.sub(r'{[^}]+}', '', text)
     return text.strip()
 
-# --- UNIFIED SUBTITLE STYLER & WATERMARK INJECTOR ---
 def convert_and_style_sub(sub_path, video_duration):
     def to_ass_time(seconds):
         h = int(seconds // 3600)
@@ -102,9 +137,8 @@ def convert_and_style_sub(sub_path, video_duration):
     except:
         subs = pysubs2.load(sub_path, encoding="latin-1")
 
-    # Fixed styling layout (Prevents VTT/SRT scrolling & matches sizes)
     styled_ass = f"""[Script Info]
-Title: ASI ASS Script - Complete & Fixed
+Title: ASI ASS Script - Complete & Cleaned
 ScriptType: v4.00+
 WrapStyle: 0
 ScaledBorderAndShadow: yes
@@ -132,7 +166,6 @@ Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,00
 
     for line in subs:
         if line.text.strip():
-            # Clean subtitles on hardsub
             clean_text = clean_srt_tags(line.text)
             clean_text = clean_text.replace('\n', '\\N').replace('\r', '')
             styled_ass += f"Dialogue: 0,{mt(line.start)},{mt(line.end)},Default,,0000,0000,0000,,{clean_text}\n"
@@ -142,9 +175,8 @@ Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,00
         f.write(styled_ass)
     return output_path
 
-# ================= STAGE 1: DOWNLOAD (WITH AUTO RETRY) =================
+# ================= DOWNLOAD STAGE =================
 async def dl(app):
-    # Workspace cleanup at start to avoid file corruption
     for temp_f in ["video.mp4", "out.mp4", "extracted_softsub.srt", "styled_subtitle.ass", "wm.png"]:
         if os.path.exists(temp_f):
             try: os.remove(temp_f)
@@ -152,7 +184,6 @@ async def dl(app):
 
     st = await app.send_message(CHAT_ID, "⚙️ Worker: Preparing Download...")
     
-    # Auto-retry download logic (Prevents prematurely ended files on network fluctuations)
     v = None
     for attempt in range(2):
         reset_prog()
@@ -161,29 +192,28 @@ async def dl(app):
                 try: os.remove("video.mp4")
                 except: pass
                 
-            v = await app.download_media(VIDEO_ID, file_name="video.mp4", progress=prog, progress_args=(app, st.id, f"📥 Video (Attempt {attempt+1})..."))
-            # If successfully downloaded and greater than 50 KB, proceed
+            v = await app.download_media(VIDEO_ID, file_name="video.mp4", progress=prog, progress_args=(app, st.id, f"📥 Downloading Video (Attempt {attempt+1})..."))
             if v and os.path.exists(v) and os.path.getsize(v) > 50000:
                 break
         except Exception as e:
-            print(f"Download attempt {attempt+1} failed: {e}")
+            print(f"Download attempt failed: {e}")
             await asyncio.sleep(5)
     
     if not v or not os.path.exists(v) or os.path.getsize(v) < 1000:
-        raise Exception("❌ Telegram side download error! Downloaded file is empty or corrupted.")
+        raise Exception("❌ Telegram side download error! Downloaded file is empty.")
 
     s, w = None, None
     if TASK_TYPE == "hsub":
         reset_prog()
-        s = await app.download_media(SUB_ID, progress=prog, progress_args=(app, st.id, "📥 Subtitle..."))
+        s = await app.download_media(SUB_ID, progress=prog, progress_args=(app, st.id, "📥 Downloading Subtitle..."))
         if WM_ID != "none": 
             reset_prog()
-            w = await app.download_media(WM_ID, file_name="wm.png", progress=prog, progress_args=(app, st.id, "📥 Watermark..."))
+            w = await app.download_media(WM_ID, file_name="wm.png", progress=prog, progress_args=(app, st.id, "📥 Downloading Watermark..."))
             
     await app.edit_message_text(CHAT_ID, st.id, "🔥 **Worker: Processing Started!**")
     return v, s, w, st.id
 
-# ================= STAGE 2: ENCODE (WITH AUTO EXTRACT) =================
+# ================= ENCODE & CONVERT STAGE =================
 async def enc(app, v, s, w, mid):
     out = RENAME if RENAME != "none" else "out.mp4"
     out = os.path.basename(out)
@@ -208,29 +238,28 @@ async def enc(app, v, s, w, mid):
             cmd = ["ffmpeg", "-y", "-i", v, "-vf", v_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out]
             
     elif TASK_TYPE == "resize": 
-        await app.edit_message_text(CHAT_ID, mid, "⚙️ Worker: Compressing Video...")
+        await app.edit_message_text(CHAT_ID, mid, "⚙️ Worker: Compressing Video & Subtitle extraction...")
         if valid_res:
             scale_filter = f"scale=-2:{RESO}"
         else:
             scale_filter = "scale='trunc(iw/2)*2:trunc(ih/2)*2'"
         cmd = ["ffmpeg", "-y", "-i", v, "-vf", scale_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out]
         
-        # Checking for soft subtitle stream inside the video
+        # Soft-subtitle checking and extracting as requested
         sub_streams = get_subtitle_streams(v)
         if sub_streams:
             extracted_sub = "extracted_softsub.srt"
-            # Extract first soft subtitle track directly
             ext_cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "srt", extracted_sub]
             subprocess.run(ext_cmd, capture_output=True)
             if os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
                 try:
-                    # Clean subtitle size/HTML tags before saving
+                    # Parse and clean SRT text perfectly
                     tmp_subs = pysubs2.load(extracted_sub)
                     for line in tmp_subs:
                         line.text = clean_srt_tags(line.text)
                     tmp_subs.save(extracted_sub)
                 except Exception as e:
-                    print("Error cleaning softsub tags:", e)
+                    print("Error cleaning soft subtitle:", e)
             else:
                 extracted_sub = None
         
@@ -239,10 +268,8 @@ async def enc(app, v, s, w, mid):
         out = "extracted_sub.srt"
         cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "copy", out] 
     
-    # Dynamic status bar: Compressing Video vs Encoding Hardsub
     status_text = "Compressing Video" if TASK_TYPE == "resize" else "Encoding Hardsub"
     
-    # FFmpeg processing live loop (Puri Tarah purani untitled 02 speed ke sath)
     cmd_with_progress = cmd[:-1] + ["-progress", "pipe:1", "-nostats"] + [cmd[-1]]
     process = await asyncio.create_subprocess_exec(
         *cmd_with_progress,
@@ -276,8 +303,9 @@ async def enc(app, v, s, w, mid):
                 speed = line_str.split("=")[1].strip()
             elif "progress=" in line_str:
                 now = time.time()
-                if now - last_update > 8 or line_str.endswith("end"):
-                    bar = "▰" * int(percentage / 10) + "▱" * (10 - int(percentage / 10))
+                # Status bar rate limit to ensure fast process execution
+                if now - last_update > 10 or line_str.endswith("end"):
+                    bar = get_progress_bar(percentage, "dot")
                     try:
                         await app.edit_message_text(
                             CHAT_ID, mid,
@@ -302,13 +330,13 @@ async def enc(app, v, s, w, mid):
     
     return out, process.returncode, "".join(stderr_lines[-20:]), extracted_sub
 
-# ================= STAGE 3: UPLOAD =================
+# ================= UPLOAD STAGE =================
 async def up(app, out, rc, err, mid, extracted_sub=None):
     if rc == 0 and os.path.exists(out) and os.path.getsize(out) > 0:
         reset_prog()
         file_name = os.path.basename(out)
         
-        # Upload main video
+        # Uploading compressed video
         await app.send_document(
             CHAT_ID, 
             document=out, 
@@ -317,7 +345,7 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
             progress_args=(app, mid, "📤 Uploading Video...")
         )
         
-        # Softsub extension back to .srt as requested
+        # Send clean soft subtitle alongside the video with matching names as requested
         if extracted_sub and os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
             sub_name = file_name.rsplit(".", 1)[0] + ".srt"
             try:
@@ -332,9 +360,9 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
                 
         await app.delete_messages(CHAT_ID, mid)
     else: 
-        await app.edit_message_text(CHAT_ID, mid, f"❌ **Error:** `{err[-500:] if err else 'Unknown FFmpeg Error'}`")
+        await app.edit_message_text(CHAT_ID, mid, f"❌ **Error:** `{err[-500:] if err else 'FFmpeg Error or Empty output'}`")
 
-# ================= RUN MASTER =================
+# ================= MASTER CONTROLLER =================
 async def main():
     app = Client("w_master", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
