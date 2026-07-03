@@ -8,13 +8,15 @@ pyrogram.utils.get_peer_type = lambda p: "channel" if str(p).startswith("-100") 
 # --- ENV VARIABLES ---
 API_ID, API_HASH, BOT_TOKEN = int(os.getenv("API_ID")), os.getenv("API_HASH"), os.getenv("BOT_TOKEN")
 TASK_TYPE, VIDEO_ID, SUB_ID = os.getenv("TASK_TYPE"), os.getenv("VIDEO_ID"), os.getenv("SUB_ID")
-CHAT_ID, RESO, WM_ID = int(os.getenv("CHAT_ID")), os.getenv("RESOLUTION"), os.getenv("WM_ID")
-WM_POS, RENAME = os.getenv("WM_POS"), os.getenv("RENAME")
+CHAT_ID, USER_ID, RESO = int(os.getenv("CHAT_ID")), int(os.getenv("USER_ID")), os.getenv("RESOLUTION")
+WM_ID, WM_POS, RENAME = os.getenv("WM_ID"), os.getenv("WM_POS"), os.getenv("RENAME")
 
 last_time = 0
 start_time = 0
 first_edit = True
-status_msg_id = None  # Global status message tracker for fail-proof editing
+status_msg_id = None
+user_name = "User"
+user_mention = "User"
 
 def reset_prog():
     global last_time, start_time, first_edit
@@ -22,25 +24,30 @@ def reset_prog():
     start_time = time.time()
     first_edit = True
 
-# --- CANCEL KEYBOARD HELPER ---
 def get_cancel_markup():
     return InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_action_run")]])
 
-# --- UNIQUE PROGRESS BAR GENERATOR ---
+# --- DYNAMIC MULTI-STYLE PROGRESS BARS ---
 def get_progress_bar(percentage, style="block"):
     percentage = max(0.0, min(100.0, percentage))
     total_steps = 15
     filled = int(round((percentage / 100.0) * total_steps))
     
-    if style == "block":
-        return "▰" * filled + "▱" * (total_steps - filled)
+    if style == "star":
+        # Star Style: [---⭒⋆✩☆------------]
+        star_chars = ["⭒", "⋆", "✩", "☆"]
+        filled_str = "".join(star_chars[i % len(star_chars)] for i in range(filled))
+        empty_str = "-" * (total_steps - filled)
+        return filled_str + empty_str
         
     elif style == "dot":
+        # Compressing Style: [°•°•-------------]
         filled_str = "".join("°" if i % 2 == 0 else "•" for i in range(filled))
         empty_str = "-" * (total_steps - filled)
         return filled_str + empty_str
         
     elif style == "heartbeat":
+        # Moving Heart Fire Pulse frames (Left-To-Right safe alignment)
         frames = [
             "\u200e❤️‍🔥\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
             "ﮩ٨ـ\u200e❤️‍🔥\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩﮩ٨ـ\u200eﮩ٨ـ\u200eﮩ٨ـ", 
@@ -62,7 +69,7 @@ def get_progress_bar(percentage, style="block"):
 
 # --- PROGRESS DISPATCHER ---
 async def prog(c, t, app, mid, action):
-    global last_time, start_time, first_edit
+    global last_time, start_time, first_edit, user_name, user_mention
     try:
         now = time.time()
         if start_time == 0:
@@ -75,20 +82,31 @@ async def prog(c, t, app, mid, action):
             last_time = now
             elapsed = now - start_time
             speed = c / elapsed if elapsed > 0 else 0
-            speed_mb = speed / 1048576
+            
+            # Format speed dynamically (KB vs MB)
+            if speed < 1048576:
+                speed_str = f"{speed/1024:.2f} KB/s"
+            else:
+                speed_str = f"{speed/1048576:.2f} MB/s"
+                
             percentage = (c / t) * 100 if t and t > 0 else 0
             
-            style_type = "block" if "📥" in action else "heartbeat"
+            # Action base styling checks
+            style_type = "star" if "📥" in action else "heartbeat"
             bar = get_progress_bar(percentage, style_type)
-            escaped_action = html.escape(action)
+            
+            # Custom status string design
+            status_text = "Sending from developer" if "📥" in action else "Uploading file to PM"
             
             try: 
                 await app.edit_message_text(
                     CHAT_ID, mid, 
-                    f"▸ <b>Status:</b> {escaped_action}\n"
-                    f"📊 <b>[{bar}] {percentage:.2f}%</b>\n"
-                    f"📦 <code>{c/1048576:.1f}MB / {t/1048576:.1f}MB</code>\n"
-                    f"⚡ <b>Speed:</b> <code>{speed_mb:.2f} MB/s</code>",
+                    f"👤 <b>User name:</b> {html.escape(user_name)}\n"
+                    f"⚙️ <b>Task start user:</b> {user_mention} (<code>{USER_ID}</code>)\n"
+                    f"⚡ <b>Speed:</b> <code>{speed_str}</code>\n"
+                    f"📦 <b>Size:</b> <code>{c/1048576:.1f}MB / {t/1048576:.1f}MB</code>\n\n"
+                    f"<b>{status_text}</b>\n"
+                    f"[{bar}] <b>{percentage:.2f}%</b>",
                     parse_mode="html",
                     reply_markup=get_cancel_markup()
                 )
@@ -189,16 +207,16 @@ Dialogue: 10,0:00:00.00,{end_time_str},ASI ᴀɴɪᴍᴇ_Watermark,,0000,0000,00
 
 # ================= DOWNLOAD STAGE =================
 async def dl(app):
-    global status_msg_id
+    global status_msg_id, user_name, user_mention
     for temp_f in ["video.mp4", "out.mp4", "extracted_softsub.srt", "styled_subtitle.ass", "wm.png"]:
         if os.path.exists(temp_f):
             try: os.remove(temp_f)
             except: pass
 
-    # Preparing Download status par bhi Cancel keyboard link kiya
     st = await app.send_message(
         CHAT_ID, 
-        "⚙️ Worker: Preparing Download...",
+        f"⚙️ <b>Worker: Preparing Download for</b> {user_mention}...",
+        parse_mode="html",
         reply_markup=get_cancel_markup()
     )
     status_msg_id = st.id
@@ -213,7 +231,7 @@ async def dl(app):
                 
             v = await download_helper(
                 app, VIDEO_ID, file_name="video.mp4", 
-                progress=prog, progress_args=(app, st.id, f"📥 Downloading Video (Attempt {attempt+1})...")
+                progress=prog, progress_args=(app, st.id, f"📥 Video File (Attempt {attempt+1})")
             )
             if v and os.path.exists(v) and os.path.getsize(v) > 50000:
                 break
@@ -229,24 +247,26 @@ async def dl(app):
         reset_prog()
         s = await download_helper(
             app, SUB_ID, 
-            progress=prog, progress_args=(app, st.id, "📥 Downloading Subtitle...")
+            progress=prog, progress_args=(app, st.id, "📥 Subtitle File")
         )
         if WM_ID != "none": 
             reset_prog()
             w = await download_helper(
                 app, WM_ID, file_name="wm.png", 
-                progress=prog, progress_args=(app, st.id, "📥 Downloading Watermark...")
+                progress=prog, progress_args=(app, st.id, "📥 Watermark Image")
             )
             
     await app.edit_message_text(
         CHAT_ID, st.id, 
-        "🔥 **Worker: Processing Started!**",
+        f"🔥 <b>Worker: Processing Started for</b> {user_mention}!",
+        parse_mode="html",
         reply_markup=get_cancel_markup()
     )
     return v, s, w, st.id
 
 # ================= ENCODE & CONVERT STAGE =================
 async def enc(app, v, s, w, mid):
+    global user_name, user_mention
     out = RENAME if RENAME != "none" else "out.mp4"
     out = os.path.basename(out)
     
@@ -257,7 +277,8 @@ async def enc(app, v, s, w, mid):
     if TASK_TYPE == "hsub":
         await app.edit_message_text(
             CHAT_ID, mid, 
-            "⚙️ Worker: Encoding Hardsub...",
+            f"⚙️ <b>Worker: Hardsub Encoding in progress...</b>",
+            parse_mode="html",
             reply_markup=get_cancel_markup()
         )
         styled_sub_path = convert_and_style_sub(s, duration)
@@ -276,7 +297,8 @@ async def enc(app, v, s, w, mid):
     elif TASK_TYPE == "resize": 
         await app.edit_message_text(
             CHAT_ID, mid, 
-            "⚙️ Worker: Compressing Video & Subtitle extraction...",
+            "⚙️ <b>Worker: Compressing Video & Subtitle extraction...</b>",
+            parse_mode="html",
             reply_markup=get_cancel_markup()
         )
         if valid_res:
@@ -285,6 +307,7 @@ async def enc(app, v, s, w, mid):
             scale_filter = "scale='trunc(iw/2)*2:trunc(ih/2)*2'"
         cmd = ["ffmpeg", "-y", "-i", v, "-vf", scale_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out]
         
+        # Soft subtitle check and clean extraction logic
         sub_streams = get_subtitle_streams(v)
         if sub_streams:
             extracted_sub = "extracted_softsub.srt"
@@ -304,14 +327,14 @@ async def enc(app, v, s, w, mid):
     elif TASK_TYPE == "extract": 
         await app.edit_message_text(
             CHAT_ID, mid, 
-            "⚙️ Worker: Extracting Subtitle...",
+            "⚙️ <b>Worker: Extracting Subtitle...</b>",
+            parse_mode="html",
             reply_markup=get_cancel_markup()
         )
         out = "extracted_sub.srt"
         cmd = ["ffmpeg", "-y", "-i", v, "-map", "0:s:0", "-c:s", "copy", out] 
     
-    status_text = "Compressing Video" if TASK_TYPE == "resize" else "Encoding Hardsub"
-    escaped_status = html.escape(status_text)
+    status_text = "Hardsub + Resize Processing" if TASK_TYPE == "hsub" else "Compressing Video"
     
     cmd_with_progress = cmd[:-1] + ["-progress", "pipe:1", "-nostats"] + [cmd[-1]]
     process = await asyncio.create_subprocess_exec(
@@ -352,9 +375,11 @@ async def enc(app, v, s, w, mid):
                     try:
                         await app.edit_message_text(
                             CHAT_ID, mid,
-                            f"▸ <b>Status:</b> {escaped_status}...\n"
-                            f"📊 <b>[{bar}] {percentage:.2f}%</b>\n"
-                            f"🚀 <b>Speed:</b> <code>{escaped_speed}</code>",
+                            f"👤 <b>User name:</b> {html.escape(user_name)}\n"
+                            f"⚙️ <b>Task start user:</b> {user_mention} (<code>{USER_ID}</code>)\n"
+                            f"⚡ <b>Speed:</b> <code>{escaped_speed}</code>\n\n"
+                            f"<b>{status_text}</b>\n"
+                            f"[{bar}] <b>{percentage:.2f}%</b>",
                             parse_mode="html",
                             reply_markup=get_cancel_markup()
                         )
@@ -380,28 +405,31 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
         reset_prog()
         file_name = os.path.basename(out)
         
+        # Upload video directly to User's PM (USER_ID)
         await app.send_document(
-            CHAT_ID, 
+            USER_ID, 
             document=out, 
             caption=f"✅ <b>{html.escape(file_name)}</b>", 
             parse_mode="html",
             progress=prog, 
-            progress_args=(app, mid, "📤 Uploading Video...")
+            progress_args=(app, mid, "📤 Uploading Video")
         )
         
+        # Upload extracted SRT to PM
         if extracted_sub and os.path.exists(extracted_sub) and os.path.getsize(extracted_sub) > 0:
             sub_name = file_name.rsplit(".", 1)[0] + ".srt"
             try:
                 os.rename(extracted_sub, sub_name)
                 await app.send_document(
-                    CHAT_ID, 
+                    USER_ID, 
                     document=sub_name, 
                     caption=f"📄 <b>Extracted Soft Subtitle:</b> <code>{html.escape(sub_name)}</code>",
                     parse_mode="html"
                 )
             except Exception as e:
-                print("Error uploading extracted soft subtitle:", e)
+                print("Error uploading subtitle in PM:", e)
                 
+        # Group se saare progress messages delete ho jayenge!
         await app.delete_messages(CHAT_ID, mid)
     else: 
         err_msg = err[-500:] if err else 'FFmpeg Error or Empty output'
@@ -412,12 +440,20 @@ async def up(app, out, rc, err, mid, extracted_sub=None):
             parse_mode="html"
         )
 
-# ================= RUN MASTER WITH FAIL-SAFE EXCEPTION EDITS =================
+# ================= RUN MASTER =================
 async def main():
-    global status_msg_id
+    global status_msg_id, user_name, user_mention
     app = Client("w_master", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
     
+    # User's information fetch karein dynamic mentioning ke liye
+    try:
+        user_info = await app.get_users(USER_ID)
+        user_name = user_info.first_name if user_info.first_name else "User"
+        user_mention = user_info.mention
+    except Exception as e:
+        print("Failed to fetch user name:", e)
+        
     try:
         v, s, w, mid = await dl(app)
         out, rc, err, extracted_sub = await enc(app, v, s, w, mid)
@@ -427,7 +463,6 @@ async def main():
         error_tb = traceback.format_exc()
         print(error_tb)
         try:
-            # Agar crash pehle stage me hua, toh naya msg bhejne ke bajay usi ko edit karega
             if status_msg_id:
                 await app.edit_message_text(
                     CHAT_ID, status_msg_id,
