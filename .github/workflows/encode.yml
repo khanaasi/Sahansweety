@@ -23,6 +23,8 @@ on:
         required: true
       font_link:
         required: true
+      trigger_msg_id:
+        required: true
 
 jobs:
   encode_job:
@@ -56,6 +58,7 @@ jobs:
           WM_POS: ${{ github.event.inputs.wm_pos }}
           RENAME: ${{ github.event.inputs.rename }}
           FONT_LINK: ${{ github.event.inputs.font_link }}
+          TRIGGER_MSG_ID: ${{ github.event.inputs.trigger_msg_id }}
         run: python encoder.py
       - name: Cleanup
         if: always()
