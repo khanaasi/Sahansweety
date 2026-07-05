@@ -1,4 +1,4 @@
-name: Video Encoder Workflow
+name: Video Processing Workflow
 
 on:
   workflow_dispatch:
@@ -21,6 +21,8 @@ on:
         required: true
       rename:
         required: true
+      font_link:
+        required: true
 
 jobs:
   encode_job:
@@ -29,15 +31,17 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      - name: Install Sys Deps
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fontconfig
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - name: Install Py Deps
-        run: pip install pyrogram tgcrypto pysubs2 requests
-      - name: Run Encoder
+      - name: Install Python Deps
+        run: pip install pyrogram tgcrypto pysubs2 requests fonttools
+      - name: Run Dedicated Video Worker
         env:
           API_ID: ${{ secrets.API_ID }}
           API_HASH: ${{ secrets.API_HASH }}
@@ -51,6 +55,7 @@ jobs:
           WM_ID: ${{ github.event.inputs.wm_id }}
           WM_POS: ${{ github.event.inputs.wm_pos }}
           RENAME: ${{ github.event.inputs.rename }}
+          FONT_LINK: ${{ github.event.inputs.font_link }}
         run: python encoder.py
       - name: Cleanup
         if: always()
