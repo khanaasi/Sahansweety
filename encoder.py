@@ -28,6 +28,7 @@ WM_ID = os.getenv("WM_ID")
 WM_POS = os.getenv("WM_POS")
 RENAME = os.getenv("RENAME")
 FONT_LINK = os.getenv("FONT_LINK")
+TRIGGER_MSG_ID = os.getenv("TRIGGER_MSG_ID")
 
 last_time = 0
 start_time = 0
@@ -40,7 +41,18 @@ def reset_prog():
     last_time = time.time()
     start_time = time.time()
 
-# --- CUSTOM PROGRESS BAR BUILDERS (VERIFIED SCHEMES) ---
+# --- HIGH-SPEED CONCURRENT TRANSMISSION CONFIGS ---
+# Pyrogram is instantiated with 32 workers and 16 concurrent transmissions to fully utilize VM network capability
+app = Client(
+    "WorkflowWorker", 
+    api_id=API_ID, 
+    api_hash=API_HASH, 
+    bot_token=BOT_TOKEN,
+    workers=32,
+    max_concurrent_transmissions=16
+)
+
+# --- PROGRESS BAR SCHEMES ---
 
 def get_hardsub_download_bar(percent):
     total_slots = 20
@@ -73,7 +85,7 @@ def get_send_bar(percent):
     bar_str = "█" * filled + "░" * (total_slots - filled)
     return f"[{bar_str}] {percent:.0f}%"
 
-# --- PROGRESS DISPATCHER ---
+# --- PROGRESS CALLBACK DISPATCHER ---
 async def prog(c, t, app, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
@@ -82,20 +94,19 @@ async def prog(c, t, app, step_name):
         last_time = now
         return
         
-    if now - last_time > 8 or c == t:
+    if now - last_time > 5 or c == t:
         elapsed = now - start_time
         speed = c / elapsed if elapsed > 0 else 0
         speed_kb = speed / 1024
         percent = (c / t) * 100 if t > 0 else 0
         
-        # Match progress layout dynamically
         if step_name == "hardsub_download":
             bar = get_hardsub_download_bar(percent)
             text = f"Downloading video\n{bar}\nSpeed: {speed_kb:.1f} kb/s"
         elif step_name == "compress_download":
             bar = get_compress_download_bar(percent)
             text = f"Downloading video\n{bar}\nSpeed: {speed_kb:.1f} kb/s"
-        else:  # Sending video (Both)
+        else:
             bar = get_send_bar(percent)
             text = f"Sending video\n{bar}\nSpeed: {speed_kb:.1f} kb/s"
             
@@ -106,7 +117,7 @@ async def prog(c, t, app, step_name):
             pass
         last_time = now
 
-# --- TIMELINES UNALTERED DIALOGUE EXTRACER ---
+# --- TIMELINES UNALTERED CLEAN ASS EXTRACER ---
 def extract_clean_dialogues(input_subtitle, output_ass):
     try:
         subs = pysubs2.load(input_subtitle)
@@ -135,13 +146,11 @@ def extract_clean_dialogues(input_subtitle, output_ass):
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
         
     for line in subs:
-        # Clean text: remove styles, <>, or special codes
         text = line.text
         text = re.sub(r'\{[^}]+\}', '', text)
         text = re.sub(r'<[^>]+>', '', text)
         text = text.replace('\r', '').replace('\n', ' ')
         text = text.strip()
-        
         if text:
             start_t = to_ass_time(line.start)
             end_t = to_ass_time(line.end)
@@ -188,32 +197,36 @@ def get_video_duration(video_path):
 # --- MASTER RUNNER ---
 async def main():
     global status_msg_id
-    app = Client("WorkflowWorker", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
+
+    # Instant cleanup of trigger message to prevent double layout accumulation
+    if TRIGGER_MSG_ID and TRIGGER_MSG_ID != "none":
+        try:
+            await app.delete_messages(CHAT_ID, int(TRIGGER_MSG_ID))
+        except Exception as ex:
+            print(f"Error purging trigger message: {ex}")
 
     init_msg = await app.send_message(
         CHAT_ID, 
-        "⚙️ **Worker initialized.** Pre-processing assets...",
+        "⚙️ **Worker initialized.** Preparing high-speed downloads...",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
     )
     status_msg_id = init_msg.id
 
     try:
-        # 1. DOWNLOAD VIDEO
+        # 1. DOWNLOAD VIDEO (SUPER SPEED)
         step_dl = "hardsub_download" if TASK_TYPE == "hardsub" else "compress_download"
         video_file = await download_tg_link(app, VIDEO_ID, "video.mp4", step_dl)
-        if not video_file or not os.path.exists(video_file):
-            raise Exception("Telegram video payload retrieval failed.")
+        if not video_file or not os.path.exists(video_file) or os.path.getsize(video_file) < 1000:
+            raise Exception("Telegram video download returned an empty file or failed completely.")
 
         duration = get_video_duration(video_file)
 
-        # 2. AUTO-DELETE DOWNLOAD PROGRESS BAR
-        try:
-            await app.delete_messages(CHAT_ID, status_msg_id)
-        except:
-            pass
+        # Step 1 Complete -> Deleting Old Downloading Message
+        try: await app.delete_messages(CHAT_ID, status_msg_id)
+        except: pass
 
-        # 3. DOWNLOAD FONT IF ACTIVE
+        # DOWNLOAD FONT IF ACTIVE
         font_name = "Arial"
         if FONT_LINK != "none":
             r = requests.get(FONT_LINK)
@@ -223,9 +236,8 @@ async def main():
                     f.write(r.content)
                 font_name = get_font_name(font_path)
 
-        # 4. START COMPRESSION WORKFLOW
+        # 2. START COMPRESSION WORKFLOW
         if TASK_TYPE == "compress":
-            # Extract Timings-Unaltered Clean ASS Subtitle
             sub_extracted = "extracted_clean.ass"
             try:
                 subprocess.run(["ffmpeg", "-y", "-i", video_file, "-map", "0:s:0", "raw_sub.srt"], capture_output=True)
@@ -236,8 +248,8 @@ async def main():
             except:
                 sub_extracted = None
 
-            height = RESOLUTION.replace("p", "")
-            out_name = f"compressed_{RESOLUTION}.mp4"
+            height = RESOLUTION.replace("p", "").replace("P", "")
+            out_name = f"compressed_{RESOLUTION.lower()}.mp4"
             
             proc_msg = await app.send_message(
                 CHAT_ID, 
@@ -246,37 +258,65 @@ async def main():
             )
             status_msg_id = proc_msg.id
 
-            # Compression with progress tracking
+            # Crash proof scale calculations divisible by 2
+            scale_filter = f"scale=-2:{height}"
+            
             cmd = [
                 "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, 
-                "-vf", f"scale=-2:{height}", 
+                "-vf", scale_filter, 
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", 
                 "-c:a", "aac", "-b:a", "128k", out_name
             ]
             
-            process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
-                line_str = line.decode('utf-8', errors='ignore').strip()
-                if "out_time_us=" in line_str:
-                    try:
-                        us = int(line_str.split("=")[1])
-                        percent = (us / 1000000.0 / duration) * 100
-                        bar = get_compress_process_bar(percent)
-                        await app.edit_message_text(CHAT_ID, status_msg_id, f"Compress / extract\n{bar}",
-                                                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]]))
-                    except:
-                        pass
+            process = await asyncio.create_subprocess_exec(
+                *cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE
+            )
+            
+            stderr_lines = []
+            
+            async def read_stderr():
+                while True:
+                    line = await process.stderr.readline()
+                    if not line: break
+                    stderr_lines.append(line.decode('utf-8', errors='ignore'))
+                    
+            async def read_stdout():
+                while True:
+                    line = await process.stdout.readline()
+                    if not line: break
+                    line_str = line.decode('utf-8', errors='ignore').strip()
+                    if "out_time_us=" in line_str:
+                        try:
+                            us = int(line_str.split("=")[1])
+                            percent = (us / 1000000.0 / duration) * 100
+                            bar = get_compress_process_bar(percent)
+                            await app.edit_message_text(
+                                CHAT_ID, status_msg_id, 
+                                f"Compress / extract\n{bar}",
+                                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
+                            )
+                        except:
+                            pass
+                            
+            await asyncio.gather(read_stdout(), read_stderr())
             await process.wait()
 
-            # Clean processing block
+            if process.returncode != 0:
+                err_msg = "".join(stderr_lines[-15:])
+                raise Exception(f"FFmpeg compression failed: {err_msg}")
+
+            # Step 2 Complete -> Deleting Old Processing Message
             try: await app.delete_messages(CHAT_ID, status_msg_id)
             except: pass
 
-            # Direct Deliver Privately to PM
-            upload_msg = await app.send_message(CHAT_ID, "Sending video\n" + get_send_bar(0))
+            # 3. UPLOADING PROGRESS STAGE (SUPER SPEED)
+            upload_msg = await app.send_message(
+                CHAT_ID, 
+                "Sending video\n" + get_send_bar(0),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
+            )
             status_msg_id = upload_msg.id
             
             reset_prog()
@@ -288,20 +328,19 @@ async def main():
                 progress_args=(app, "sending_video")
             )
             
-            # Post to Log Channel
+            # Post final outputs to Logs/Desk Channel
             await app.send_document(DESK_CHANNEL_ID, document=video_uploaded.document.file_id, caption=f"🎬 Logs: Compressed Video ({RESOLUTION})")
             
             if sub_extracted and os.path.exists(sub_extracted):
                 sub_uploaded = await app.send_document(USER_ID, document=sub_extracted, caption="📄 Extracted Dialogues ASS File")
                 await app.send_document(DESK_CHANNEL_ID, document=sub_uploaded.document.file_id, caption="📄 Log: Extracted Dialogues ASS")
 
-        # 5. START HARDSUB WORKFLOW
+        # 4. START HARDSUB WORKFLOW
         elif TASK_TYPE == "hardsub":
             sub_file = await download_tg_link(app, SUB_ID, "sub_raw", "hardsub_download")
             if not sub_file or not os.path.exists(sub_file):
                 raise Exception("Subtitle pipeline download failure.")
 
-            # Load subtitle configuration
             try:
                 subs = pysubs2.load(sub_file, encoding="utf-8")
             except:
@@ -311,25 +350,21 @@ async def main():
             has_watermark = False
 
             if is_ass:
-                # Scan raw lines for embedded logs/watermarks (case-insensitive check)
                 with open(sub_file, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read().lower()
                     if any(word in content for word in ["logo", "watermark", "cr", "credit"]):
                         has_watermark = True
 
-                # Apply font selection if requested
                 if FONT_LINK != "none":
                     for style_obj in subs.styles.values():
                         style_obj.fontname = font_name
             else:
-                # SRT / VTT auto-scaling and sizing transformation
                 new_subs = pysubs2.SSAFile()
                 new_subs.styles["Default"] = pysubs2.SSAStyle(
                     fontname=font_name, fontsize=24, primarycolor=pysubs2.Color(255, 255, 255),
                     outlinecolor=pysubs2.Color(0, 0, 0), outline=2, shadow=1, marginl=20, marginr=20, marginv=15
                 )
                 for line in subs:
-                    # Clean tags
                     clean_text = line.text
                     clean_text = re.sub(r'\{[^}]+\}', '', clean_text)
                     clean_text = re.sub(r'<[^>]+>', '', clean_text)
@@ -344,13 +379,16 @@ async def main():
             if WM_ID != "none" and not has_watermark:
                 wm_file = await download_tg_link(app, WM_ID, "watermark.png", "hardsub_download")
 
-            # Setup ffmpeg filter configuration
             vf_filter = "subtitles=ready_sub.ass"
             if FONT_LINK != "none":
                 vf_filter = "subtitles=ready_sub.ass:fontsdir=fonts"
 
             overlay_coord = "W-w-15:15" if WM_POS == "right" else "15:15"
             out_name = RENAME if RENAME != "none" else "hardsub_output.mp4"
+
+            # Step 1 Complete -> Purging Old Progress Message
+            try: await app.delete_messages(CHAT_ID, status_msg_id)
+            except: pass
 
             proc_msg = await app.send_message(
                 CHAT_ID, 
@@ -371,29 +409,54 @@ async def main():
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-c:a", "aac", out_name
                 ]
 
-            process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-            while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
-                line_str = line.decode('utf-8', errors='ignore').strip()
-                if "out_time_us=" in line_str:
-                    try:
-                        us = int(line_str.split("=")[1])
-                        percent = (us / 1000000.0 / duration) * 100
-                        bar = get_hardsub_encode_bar(percent)
-                        await app.edit_message_text(CHAT_ID, status_msg_id, f"Encoding + resizing\n{bar}",
-                                                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]]))
-                    except:
-                        pass
+            process = await asyncio.create_subprocess_exec(
+                *cmd, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE
+            )
+            
+            stderr_lines = []
+            
+            async def read_stderr():
+                while True:
+                    line = await process.stderr.readline()
+                    if not line: break
+                    stderr_lines.append(line.decode('utf-8', errors='ignore'))
+
+            async def read_stdout():
+                while True:
+                    line = await process.stdout.readline()
+                    if not line: break
+                    line_str = line.decode('utf-8', errors='ignore').strip()
+                    if "out_time_us=" in line_str:
+                        try:
+                            us = int(line_str.split("=")[1])
+                            percent = (us / 1000000.0 / duration) * 100
+                            bar = get_hardsub_encode_bar(percent)
+                            await app.edit_message_text(
+                                CHAT_ID, status_msg_id, 
+                                f"Encoding + resizing\n{bar}",
+                                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
+                            )
+                        except:
+                            pass
+            await asyncio.gather(read_stdout(), read_stderr())
             await process.wait()
 
-            # Clean processing block
+            if process.returncode != 0:
+                err_msg = "".join(stderr_lines[-15:])
+                raise Exception(f"FFmpeg hardsub encoding failed: {err_msg}")
+
+            # Step 2 Complete -> Purging Old Progress Message
             try: await app.delete_messages(CHAT_ID, status_msg_id)
             except: pass
 
-            # Upload stage
-            upload_msg = await app.send_message(CHAT_ID, "Sending video\n" + get_send_bar(0))
+            # 3. UPLOADING PROGRESS STAGE (SUPER SPEED)
+            upload_msg = await app.send_message(
+                CHAT_ID, 
+                "Sending video\n" + get_send_bar(0),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
+            )
             status_msg_id = upload_msg.id
 
             reset_prog()
@@ -405,14 +468,20 @@ async def main():
                 progress_args=(app, "sending_video")
             )
             
-            # Logs desk channel post
             await app.send_document(DESK_CHANNEL_ID, document=video_uploaded.document.file_id, caption=f"🎬 Logs: Hardsubbed Video `{out_name}`")
 
-        # Cleanup VM update frames
-        await app.delete_messages(CHAT_ID, status_msg_id)
+        # Step 3 Complete -> Final Cleanup of Upload progress message
+        try: await app.delete_messages(CHAT_ID, status_msg_id)
+        except: pass
 
     except Exception as e:
         print(f"Workflow Exception: {e}")
+        # ALWAYS PURGE THE CURRENT STUCK PROGRESS MESSAGE DURING CRASH
+        if status_msg_id:
+            try:
+                await app.delete_messages(CHAT_ID, status_msg_id)
+            except:
+                pass
         try:
             await app.send_message(CHAT_ID, f"❌ **Workflow Run Crash:** `{e}`")
         except:
