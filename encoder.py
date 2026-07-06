@@ -44,14 +44,16 @@ def reset_prog():
     last_time = time.time()
     start_time = time.time()
 
-# --- HIGH-SPEED CONCURRENT TRANSMISSION CONFIGS ---
+# --- BALANCED HIGH-SPEED CLIENT CONFIGURATION ---
+# max_concurrent_transmissions=4 and workers=24 represents the absolute sweet spot 
+# that maximizes speed while preventing Telegram's silent connection limits throttling.
 app = Client(
     "WorkflowWorker", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN,
-    workers=64,
-    max_concurrent_transmissions=24
+    workers=24,
+    max_concurrent_transmissions=4
 )
 
 # --- PROGRESS BAR SCHEMES ---
@@ -102,7 +104,7 @@ async def prog(c, t, app, step_name):
         speed_kb = speed / 1024
         percent = (c / t) * 100 if t > 0 else 0
         
-        # Adaptive speed units
+        # Adaptive speed units formatting
         if speed_kb >= 1024:
             speed_str = f"{speed_kb / 1024:.2f} MB/s"
         else:
@@ -449,7 +451,7 @@ async def main():
                 chat_id=CHAT_ID,
                 target_user=USER_ID,
                 file_path=out_name,
-                caption=f"✅ Complete 💯 Compression\n`{out_name}`",
+                caption=f"✅ Complete 💯 Compression\n{os.path.basename(out_name)}",
                 progress_callback=prog,
                 width=final_width,
                 height=final_height,
@@ -600,7 +602,7 @@ async def main():
                 chat_id=CHAT_ID,
                 target_user=USER_ID,
                 file_path=out_name,
-                caption=f"✅ Complete 💯 Hardsub\n`{out_name}`",
+                caption=f"✅ Complete 💯 Hardsub\n{os.path.basename(out_name)}",
                 progress_callback=prog,
                 width=out_width,
                 height=out_height,
