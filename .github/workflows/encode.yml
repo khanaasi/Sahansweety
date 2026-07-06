@@ -29,7 +29,7 @@ on:
 jobs:
   encode_job:
     runs-on: ubuntu-latest
-    timeout-minutes: 20 # 20 Minutes me runner auto-kill ho jayega agar kahin atka toh
+    timeout-minutes: 20
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
