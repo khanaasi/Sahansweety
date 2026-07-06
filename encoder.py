@@ -46,7 +46,25 @@ def reset_prog():
     last_time = time.time()
     start_time = time.time()
 
-# --- HTTP UI UPDATER (Prevents TCP Idle Drop) ---
+# --- CUSTOM PROGRESS BAR STYLES ---
+def get_download_bar(percent):
+    total = 15
+    filled = int(percent / 100 * total)
+    return f"[{'>' * filled}{'-' * (total - filled)}]"
+
+def get_process_bar(percent):
+    total = 18
+    filled = int(percent / 100 * total)
+    seq = ["•", "°", ":", "°", "•", ":"]
+    bar = "".join(seq[i % len(seq)] for i in range(filled))
+    return f"[{bar}{'-' * (total - filled)}]"
+
+def get_send_bar(percent):
+    total = 10
+    filled = int(percent / 100 * total)
+    return f"[{'▓' * filled}{'░' * (total - filled)}]"
+
+# --- HTTP UI UPDATER ---
 def _sync_http_edit(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
     payload = {
@@ -62,7 +80,7 @@ def _sync_http_edit(text):
 async def update_http_status(text):
     await asyncio.to_thread(_sync_http_edit, text)
 
-# --- PYROGRAM 10-SECOND PROGRESS BAR ---
+# --- FAST 10-SECOND PYROGRAM PROGRESS BAR ---
 async def prog(c, t, app_instance, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
@@ -78,9 +96,11 @@ async def prog(c, t, app_instance, step_name):
         percent = (c / t) * 100 if t > 0 else 0
         
         if step_name == "hardsub_download" or step_name == "compress_download":
-            text = f"📥 Downloading Video...\n⏳ `[{percent:.1f}%]`\n🚀 Speed: `{speed_mb:.2f} MB/s`\n📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`"
+            bar = get_download_bar(percent)
+            text = f"Downloading video\n{bar} [{percent:.0f}%]\n🚀 `{speed_mb:.2f} MB/s` | 📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`"
         else:
-            text = f"📤 Sending Video...\n⏳ `[{percent:.1f}%]`\n🚀 Speed: `{speed_mb:.2f} MB/s`\n📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`"
+            bar = get_send_bar(percent)
+            text = f"Sending video\n{bar} [{percent:.0f}%]\n🚀 `{speed_mb:.2f} MB/s` | 📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`"
             
         cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
         try: await app_instance.edit_message_text(CHAT_ID, status_msg_id, text, reply_markup=cancel_markup)
@@ -135,13 +155,12 @@ async def download_tg_link(app_instance, link, output_path, step_name):
         msg = await app_instance.get_messages(CHAT_ID, msg_id)
         if msg.document or msg.video or msg.photo:
             reset_prog()
-            # 30 MINUTE TIMEOUT - Protects large files from failing!
             return await asyncio.wait_for(msg.download(file_name=output_path, progress=prog, progress_args=(app_instance, step_name)), timeout=1800)
     except Exception as e: 
         print(f"Download Error: {e}")
     return None
 
-# --- STRICT DELIVERY MODULE (Private PM + Desk Channel Only) AS DOCUMENT ---
+# --- STRICT DELIVERY MODULE (DOCUMENT FORMAT ONLY) ---
 async def deliver_video_asset(app_instance, chat_id, target_user, file_path, caption, progress_callback):
     if not os.path.exists(file_path) or os.path.getsize(file_path) < 100:
         raise Exception("Processed video is missing or empty!")
@@ -156,7 +175,6 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
     reset_prog()
     try:
         desk_msg = await asyncio.wait_for(
-            # Send as Document
             app_instance.send_document(
                 chat_id=DESK_CHANNEL_ID, document=file_path, caption=f"🎬 Logs: {caption}", thumb=thumb_path,
                 progress=progress_callback, progress_args=(app_instance, "sending_video")
@@ -169,12 +187,10 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
     pm_msg = None
     try:
         if file_id:
-            # ZERO DELAY DELIVERY AS DOCUMENT
             pm_msg = await app_instance.send_document(chat_id=target_user, document=file_id, caption=caption)
         else:
             reset_prog()
             pm_msg = await asyncio.wait_for(
-                # Fallback direct send as Document
                 app_instance.send_document(
                     chat_id=target_user, document=file_path, caption=caption, thumb=thumb_path,
                     progress=progress_callback, progress_args=(app_instance, "sending_video")
@@ -192,8 +208,8 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
 async def main():
     global status_msg_id
     
-    # ---------------- PHASE 1: DOWNLOAD (Client 1) ----------------
-    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+    # MAX CONCURRENT TRANSMISSIONS ADDED = 10x DOWNLOADING SPEED!
+    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=10)
     await app.start()
 
     if TRIGGER_MSG_ID and TRIGGER_MSG_ID != "none":
@@ -248,15 +264,13 @@ async def main():
             if WM_ID != "none" and not has_watermark:
                 wm_file = await download_tg_link(app, WM_ID, "watermark.png", "hardsub_download")
 
-        # MAGICAL FIX: Stop App! (Taki upload phase me TCP freeze na ho)
         await app.stop()
 
 
-        # ---------------- PHASE 2: PROCESSING ENCODE (HTTP PROGRESS) ----------------
+        # ---------------- PHASE 2: PROCESSING ENCODE ----------------
         if TASK_TYPE == "compress":
             sub_extracted = "extracted_clean.ass"
             try:
-                # FIX: Removed -c:s copy so it converts safely to raw_sub.srt to extract clean ASS
                 subprocess.run(["ffmpeg", "-y", "-i", video_file, "-map", "0:s:0", "raw_sub.srt"], capture_output=True)
                 if os.path.exists("raw_sub.srt") and os.path.getsize("raw_sub.srt") > 0: extract_clean_dialogues("raw_sub.srt", sub_extracted)
                 else: sub_extracted = None
@@ -269,13 +283,14 @@ async def main():
                 scale_filter = "scale='trunc(iw/2)*2:trunc(ih/2)*2'"
 
             out_name = f"compressed_{reso_clean if reso_clean else 'output'}.mp4"
-            await update_http_status("⚙️ Compress / extract\n⏳ `[0.0%]`")
+            await update_http_status(f"Compress/extract\n{get_process_bar(0)} [0.0%]")
             
-            # ALL SPEED HACKS COMBINED (ultrafast, threads 0, crf 34, faststart)
+            # MAGICAL FIX FOR SUBS: Added -map 0:v -map 0:a? -map 0:s? -c:s copy
             cmd = [
                 "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", scale_filter, 
+                "-map", "0:v", "-map", "0:a?", "-map", "0:s?",
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-threads", "0", 
-                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
+                "-c:a", "aac", "-b:a", "128k", "-c:s", "copy", "-movflags", "+faststart", out_name
             ]
             
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -296,7 +311,7 @@ async def main():
                         if now - last_edit > 10:
                             try:
                                 percent = min((int(line_str.split("=")[1]) / 1000000.0 / duration) * 100, 100.0)
-                                asyncio.create_task(update_http_status(f"⚙️ Compress / extract\n⏳ `[{percent:.1f}%]`"))
+                                asyncio.create_task(update_http_status(f"Compress/extract\n{get_process_bar(percent)} [{percent:.1f}%]"))
                             except: pass
                             last_edit = now
             await read_stdout()
@@ -311,9 +326,8 @@ async def main():
             overlay_coord = "W-w-15:15" if WM_POS == "right" else "15:15"
             out_name = RENAME if RENAME != "none" else "hardsub_output.mp4"
 
-            await update_http_status("⚙️ Encoding + resizing\n⏳ `[0.0%]`")
+            await update_http_status(f"Encoding + resizing\n{get_process_bar(0)} [0.0%]")
 
-            # ALL SPEED HACKS COMBINED (ultrafast, threads 0, crf 34, faststart)
             if wm_file and os.path.exists(wm_file):
                 cmd = [
                     "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-i", wm_file, 
@@ -346,7 +360,7 @@ async def main():
                         if now - last_edit > 10:
                             try:
                                 percent = min((int(line_str.split("=")[1]) / 1000000.0 / duration) * 100, 100.0)
-                                asyncio.create_task(update_http_status(f"⚙️ Encoding + resizing\n⏳ `[{percent:.1f}%]`"))
+                                asyncio.create_task(update_http_status(f"Encoding + resizing\n{get_process_bar(percent)} [{percent:.1f}%]"))
                             except: pass
                             last_edit = now
             await read_stdout()
@@ -354,16 +368,15 @@ async def main():
             if process.returncode != 0: raise Exception("FFmpeg hardsub encoding failed.")
 
 
-        # ---------------- PHASE 3: UPLOAD (Client 2 - Fresh Connection) ----------------
-        app_up = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+        # ---------------- PHASE 3: UPLOAD ----------------
+        app_up = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=10)
         await app_up.start()
         
-        await update_http_status("📤 Sending Video\n⏳ `[0.0%]`")
+        await update_http_status(f"Sending video\n{get_send_bar(0)} [0.0%]")
         
         if TASK_TYPE == "compress":
             await deliver_video_asset(app_up, CHAT_ID, USER_ID, out_name, f"✅ Complete 💯 Compression\n`{out_name}`", prog)
             
-            # Original ASS Extract Delivery Logic (Desk Channel -> User PM)
             if 'sub_extracted' in locals() and sub_extracted and os.path.exists(sub_extracted):
                 try:
                     sub_desk = await asyncio.wait_for(app_up.send_document(DESK_CHANNEL_ID, document=sub_extracted, caption="📄 Log: Extracted Dialogues ASS"), timeout=600)
