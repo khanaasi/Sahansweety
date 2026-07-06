@@ -11,7 +11,6 @@ import pysubs2
 import html
 from pyrogram import Client
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.enums import ParseMode
 from fontTools.ttLib import TTFont
 
 # Client peer resolver bypass
@@ -45,8 +44,6 @@ def reset_prog():
     start_time = time.time()
 
 # --- BALANCED HIGH-SPEED CLIENT CONFIGURATION ---
-# max_concurrent_transmissions=4 and workers=24 represents the absolute sweet spot 
-# that maximizes speed while preventing Telegram's silent connection limits throttling.
 app = Client(
     "WorkflowWorker", 
     api_id=API_ID, 
@@ -89,7 +86,7 @@ def get_send_bar(percent):
     bar_str = "█" * filled + "░" * (total_slots - filled)
     return f"[{bar_str}] {percent:.0f}%"
 
-# --- PROGRESS CALLBACK DISPATCHER (UN-BLOCKING BACKGROUND TASKS) ---
+# --- PROGRESS CALLBACK DISPATCHER ---
 async def prog(c, t, app, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
@@ -122,9 +119,7 @@ async def prog(c, t, app, step_name):
             
         cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
         
-        # Rigorous Un-blocking Decoupling: We launch message edits in the background 
-        # using asyncio.create_task instead of awaiting them. This ensures any Telegram FloodWait 
-        # or edit rate-limit NEVER blocks the main media download/upload stream.
+        # Launch message edits safely in background to avoid transmission block
         asyncio.create_task(edit_msg_safe(app, CHAT_ID, status_msg_id, text, cancel_markup))
         last_time = now
 
@@ -177,11 +172,11 @@ def extract_clean_dialogues(input_subtitle, output_ass):
         f.write("\n".join(ass_lines))
 
 # --- DELIVERY MODULE (SAFE PRIVATE PM + FALLBACK GROUP DELIVERIES) ---
-async def deliver_video_asset(app, chat_id, target_user, file_path, caption, progress_callback, width=1920, height=1080, duration=0):
+async def deliver_video_asset(app, chat_id, target_user, file_path, caption, progress, width=1920, height=1080, duration=0):
     """Attempts to deliver privately to User PM, falls back to group output on PM permission errors"""
     delivery_msg = None
     
-    # Custom dimension extraction parameters to bypass Pyrogram internal ffprobe locks
+    # Custom dimension parameters to completely bypass Pyrogram internal ffprobe locks
     try:
         reset_prog()
         delivery_msg = await asyncio.wait_for(
@@ -193,7 +188,7 @@ async def deliver_video_asset(app, chat_id, target_user, file_path, caption, pro
                 width=width,
                 height=height,
                 duration=int(duration) if duration > 0 else None,
-                progress=progress_callback,
+                progress=progress,
                 progress_args=(app, "sending_video")
             ),
             timeout=900
@@ -209,7 +204,7 @@ async def deliver_video_asset(app, chat_id, target_user, file_path, caption, pro
                 chat_id=target_user,
                 document=file_path,
                 caption=caption,
-                progress=progress_callback,
+                progress=progress,
                 progress_args=(app, "sending_video")
             ),
             timeout=900
@@ -225,7 +220,7 @@ async def deliver_video_asset(app, chat_id, target_user, file_path, caption, pro
             chat_id=chat_id,
             text=f"⚠️ <a href='tg://user?id={target_user}'>User</a>, aapne bot ko PM me start nahi kiya hai, isliye video PM me nahi bheji ja saki!\n"
                  f"Maine processed video group me hi post kar di hai.",
-            parse_mode=ParseMode.HTML
+            parse_mode="html"
         )
         reset_prog()
         delivery_msg = await asyncio.wait_for(
@@ -237,7 +232,7 @@ async def deliver_video_asset(app, chat_id, target_user, file_path, caption, pro
                 width=width,
                 height=height,
                 duration=int(duration) if duration > 0 else None,
-                progress=progress_callback,
+                progress=progress,
                 progress_args=(app, "sending_video")
             ),
             timeout=900
@@ -253,7 +248,7 @@ async def deliver_video_asset(app, chat_id, target_user, file_path, caption, pro
                 chat_id=chat_id,
                 document=file_path,
                 caption=caption,
-                progress=progress_callback,
+                progress=progress,
                 progress_args=(app, "sending_video")
             ),
             timeout=900
@@ -402,7 +397,6 @@ async def main():
                 "-c:a", "aac", "-b:a", "128k", out_name
             ]
             
-            # MERGED STREAMS (stderr=subprocess.STDOUT) to completely avoid any OS pipeline deadlock hangs
             process = await asyncio.create_subprocess_exec(
                 *cmd, 
                 stdout=subprocess.PIPE, 
@@ -452,14 +446,14 @@ async def main():
             aspect_ratio = orig_width / orig_height if orig_height > 0 else 16/9
             final_width = int(round(final_height * aspect_ratio / 2) * 2)
 
-            # Safe Private PM + Fallback delivery
+            # Safe Private PM + Fallback delivery with keyword corrected parameters
             video_uploaded = await deliver_video_asset(
                 app=app,
                 chat_id=CHAT_ID,
                 target_user=USER_ID,
                 file_path=out_name,
                 caption=f"✅ Complete 💯 Compression\n{os.path.basename(out_name)}",
-                progress_callback=prog,
+                progress=prog, # Consistent verified parameter
                 width=final_width,
                 height=final_height,
                 duration=duration
@@ -610,7 +604,7 @@ async def main():
                 target_user=USER_ID,
                 file_path=out_name,
                 caption=f"✅ Complete 💯 Hardsub\n{os.path.basename(out_name)}",
-                progress_callback=prog,
+                progress=prog, # Consistent verified parameter
                 width=out_width,
                 height=out_height,
                 duration=out_duration
@@ -641,7 +635,7 @@ async def main():
         try:
             # Safe HTML Escaping for Pyrogram's Telegram delivery
             error_clean = html.escape(str(e))
-            await app.send_message(CHAT_ID, f"❌ **Workflow Run Crash:**\n<code>{error_clean}</code>", parse_mode=ParseMode.HTML)
+            await app.send_message(CHAT_ID, f"❌ **Workflow Run Crash:**\n<code>{error_clean}</code>", parse_mode="html")
         except:
             pass
     finally:
