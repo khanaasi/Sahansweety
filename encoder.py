@@ -22,7 +22,7 @@ API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 TASK_TYPE = os.getenv("TASK_TYPE")
-VIDEO_ID = os.getenv("VIDEO_ID")  # Contains Telegram link format
+VIDEO_ID = os.getenv("VIDEO_ID")
 SUB_ID = os.getenv("SUB_ID")
 CHAT_ID = int(os.getenv("CHAT_ID"))
 USER_ID = int(os.getenv("USER_ID"))
@@ -161,77 +161,6 @@ def extract_clean_dialogues(input_subtitle, output_ass):
     with open(output_ass, "w", encoding="utf-8") as f:
         f.write("\n".join(ass_lines))
 
-# --- DELIVERY MODULE (SAFE PRIVATE PM + FALLBACK GROUP DELIVERIES) ---
-async def deliver_video_asset(app, chat_id, target_user, file_path, caption, progress_callback):
-    """Attempts to deliver privately to User PM, falls back to group output on PM permission errors"""
-    delivery_msg = None
-    
-    # Try PM stream delivery first
-    try:
-        reset_prog()
-        delivery_msg = await app.send_video(
-            chat_id=target_user,
-            video=file_path,
-            caption=caption,
-            supports_streaming=True,
-            progress=progress_callback,
-            progress_args=(app, "sending_video")
-        )
-        return delivery_msg
-    except Exception as e_pm_stream:
-        print(f"[PM STREAM FAILURE] {e_pm_stream}")
-        
-    # PM Document delivery fallback
-    try:
-        reset_prog()
-        delivery_msg = await app.send_document(
-            chat_id=target_user,
-            document=file_path,
-            caption=caption,
-            progress=progress_callback,
-            progress_args=(app, "sending_video")
-        )
-        return delivery_msg
-    except Exception as e_pm_doc:
-        print(f"[PM DOC FAILURE] {e_pm_doc}")
-
-    # GROUP DELIVERY FALLBACK (If Bot is not started in PM)
-    print("Initiating Group delivery fallback stream...")
-    try:
-        await app.send_message(
-            chat_id=chat_id,
-            text=f"⚠️ <a href='tg://user?id={target_user}'>User</a>, aapne bot ko PM me start nahi kiya hai, isliye video PM me nahi bheji ja saki!\n"
-                 f"Maine processed video group me hi post kar di hai.",
-            parse_mode=ParseMode.HTML
-        )
-        reset_prog()
-        delivery_msg = await app.send_video(
-            chat_id=chat_id,
-            video=file_path,
-            caption=caption,
-            supports_streaming=True,
-            progress=progress_callback,
-            progress_args=(app, "sending_video")
-        )
-        return delivery_msg
-    except Exception as e_grp_stream:
-        print(f"[GROUP STREAM FAILURE] {e_grp_stream}")
-
-    try:
-        reset_prog()
-        delivery_msg = await app.send_document(
-            chat_id=chat_id,
-            document=file_path,
-            caption=caption,
-            progress=progress_callback,
-            progress_args=(app, "sending_video")
-        )
-        return delivery_msg
-    except Exception as e_grp_doc:
-        print(f"[CRITICAL DELIVERY FAILURE] All fallbacks failed: {e_grp_doc}")
-        
-    return None
-
 # --- HELPERS ---
 async def download_tg_link(app, link, output_path, step_name):
     parts = link.split("/")
@@ -240,11 +169,17 @@ async def download_tg_link(app, link, output_path, step_name):
         msg = await app.get_messages(CHAT_ID, msg_id)
         if msg.document or msg.video or msg.photo:
             reset_prog()
-            return await msg.download(
-                file_name=output_path, 
-                progress=prog, 
-                progress_args=(app, step_name)
+            # 10 Minutes hard timeout to avoid endless network stalls
+            return await asyncio.wait_for(
+                msg.download(
+                    file_name=output_path, 
+                    progress=prog, 
+                    progress_args=(app, step_name)
+                ),
+                timeout=600
             )
+    except asyncio.TimeoutError:
+        raise Exception("Telegram file download stalled and timed out after 10 minutes.")
     except Exception as e:
         print(f"Download error: {e}")
     return None
@@ -259,8 +194,15 @@ def get_font_name(font_path):
         print(f"Font parsing error: {e}")
     return "Arial"
 
+def get_video_duration(video_path):
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return float(res.stdout.strip())
+    except:
+        return 0.0
+
 def get_video_dimensions_and_duration(video_path):
-    """Fetches clean stream metadata from input using ffprobe"""
     cmd_dur = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_path]
     cmd_dim = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", video_path]
     
@@ -283,6 +225,89 @@ def get_video_dimensions_and_duration(video_path):
         
     return width, height, duration
 
+# --- DELIVERY MODULE (SAFE PRIVATE PM + FALLBACK GROUP DELIVERIES) ---
+async def deliver_video_asset(app, chat_id, target_user, file_path, caption, progress_callback):
+    """Attempts to deliver privately to User PM, falls back to group output on PM permission errors"""
+    delivery_msg = None
+    
+    # Try PM stream delivery first with a 15-minute hard timeout
+    try:
+        reset_prog()
+        delivery_msg = await asyncio.wait_for(
+            app.send_video(
+                chat_id=target_user,
+                video=file_path,
+                caption=caption,
+                supports_streaming=True,
+                progress=progress_callback,
+                progress_args=(app, "sending_video")
+            ),
+            timeout=900
+        )
+        return delivery_msg
+    except Exception as e_pm_stream:
+        print(f"[PM STREAM FAILURE] {e_pm_stream}")
+        
+    # PM Document delivery fallback
+    try:
+        reset_prog()
+        delivery_msg = await asyncio.wait_for(
+            app.send_document(
+                chat_id=target_user,
+                document=file_path,
+                caption=caption,
+                progress=progress_callback,
+                progress_args=(app, "sending_video")
+            ),
+            timeout=900
+        )
+        return delivery_msg
+    except Exception as e_pm_doc:
+        print(f"[PM DOC FAILURE] {e_pm_doc}")
+
+    # GROUP DELIVERY FALLBACK (If Bot is not started in PM)
+    print("Initiating Group delivery fallback stream...")
+    try:
+        await app.send_message(
+            chat_id=chat_id,
+            text=f"⚠️ <a href='tg://user?id={target_user}'>User</a>, aapne bot ko PM me start nahi kiya hai, isliye video PM me nahi bheji ja saki!\n"
+                 f"Maine processed video group me hi post kar di hai.",
+            parse_mode=ParseMode.HTML
+        )
+        reset_prog()
+        delivery_msg = await asyncio.wait_for(
+            app.send_video(
+                chat_id=chat_id,
+                video=file_path,
+                caption=caption,
+                supports_streaming=True,
+                progress=progress_callback,
+                progress_args=(app, "sending_video")
+            ),
+            timeout=900
+        )
+        return delivery_msg
+    except Exception as e_grp_stream:
+        print(f"[GROUP STREAM FAILURE] {e_grp_stream}")
+
+    try:
+        reset_prog()
+        delivery_msg = await asyncio.wait_for(
+            app.send_document(
+                chat_id=chat_id,
+                document=file_path,
+                caption=caption,
+                progress=progress_callback,
+                progress_args=(app, "sending_video")
+            ),
+            timeout=900
+        )
+        return delivery_msg
+    except Exception as e_grp_doc:
+        print(f"[CRITICAL DELIVERY FAILURE] All fallbacks failed: {e_grp_doc}")
+        
+    return None
+
 # --- MASTER RUNNER ---
 async def main():
     global status_msg_id
@@ -303,7 +328,7 @@ async def main():
     status_msg_id = init_msg.id
 
     try:
-        # 1. DOWNLOAD VIDEO (SUPER SPEED)
+        # 1. DOWNLOAD VIDEO (SUPER SPEED WITH TIMEOUT)
         step_dl = "hardsub_download" if TASK_TYPE == "hardsub" else "compress_download"
         video_file = await download_tg_link(app, VIDEO_ID, "video.mp4", step_dl)
         if not video_file or not os.path.exists(video_file) or os.path.getsize(video_file) < 1000:
@@ -359,25 +384,21 @@ async def main():
                 "-c:a", "aac", "-b:a", "128k", out_name
             ]
             
+            # MERGED STREAMS (stderr=subprocess.STDOUT) to completely avoid any OS pipeline deadlock hangs
             process = await asyncio.create_subprocess_exec(
                 *cmd, 
                 stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE
+                stderr=subprocess.STDOUT
             )
             
-            stderr_lines = []
+            output_lines = []
             
-            async def read_stderr():
-                while True:
-                    line = await process.stderr.readline()
-                    if not line: break
-                    stderr_lines.append(line.decode('utf-8', errors='ignore'))
-                    
             async def read_stdout():
                 while True:
                     line = await process.stdout.readline()
                     if not line: break
                     line_str = line.decode('utf-8', errors='ignore').strip()
+                    output_lines.append(line_str)
                     if "out_time_us=" in line_str:
                         try:
                             us = int(line_str.split("=")[1])
@@ -391,11 +412,11 @@ async def main():
                         except:
                             pass
                             
-            await asyncio.gather(read_stdout(), read_stderr())
+            await read_stdout()
             await process.wait()
 
             if process.returncode != 0:
-                err_msg = "".join(stderr_lines[-15:])
+                err_msg = "\n".join(output_lines[-15:])
                 raise Exception(f"FFmpeg compression failed: {err_msg}")
 
             # Step 2 Complete -> Deleting Old Processing Message
@@ -515,7 +536,87 @@ async def main():
             process = await asyncio.create_subprocess_exec(
                 *cmd, 
                 stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE
+                stderr=subprocess.STDOUT
             )
             
-            stderr_lines
+            output_lines = []
+            
+            async def read_stdout():
+                while True:
+                    line = await process.stdout.readline()
+                    if not line: break
+                    line_str = line.decode('utf-8', errors='ignore').strip()
+                    output_lines.append(line_str)
+                    if "out_time_us=" in line_str:
+                        try:
+                            us = int(line_str.split("=")[1])
+                            percent = (us / 1000000.0 / duration) * 100
+                            bar = get_hardsub_encode_bar(percent)
+                            await app.edit_message_text(
+                                CHAT_ID, status_msg_id, 
+                                f"Encoding + resizing\n{bar}",
+                                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
+                            )
+                        except:
+                            pass
+            await read_stdout()
+            await process.wait()
+
+            if process.returncode != 0:
+                err_msg = "\n".join(output_lines[-15:])
+                raise Exception(f"FFmpeg hardsub encoding failed: {err_msg}")
+
+            # Step 2 Complete -> Purging Old Progress Message
+            try: await app.delete_messages(CHAT_ID, status_msg_id)
+            except: pass
+
+            # 3. UPLOADING PROGRESS STAGE (SUPER SPEED)
+            upload_msg = await app.send_message(
+                CHAT_ID, 
+                "Sending video\n" + get_send_bar(0),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
+            )
+            status_msg_id = upload_msg.id
+
+            video_uploaded = await deliver_video_asset(
+                app=app,
+                chat_id=CHAT_ID,
+                target_user=USER_ID,
+                file_path=out_name,
+                caption=f"✅ Complete 💯 Hardsub\n`{out_name}`",
+                progress_callback=prog
+            )
+            
+            if video_uploaded:
+                try:
+                    await app.send_document(
+                        DESK_CHANNEL_ID, 
+                        document=video_uploaded.video.file_id if video_uploaded.video else video_uploaded.document.file_id, 
+                        caption=f"🎬 Logs: Hardsubbed Video `{out_name}`"
+                    )
+                except Exception as log_err:
+                    print(f"[LOG CHANNEL ERROR] {log_err}")
+
+        # Step 3 Complete -> Final Cleanup of Upload progress message
+        try: await app.delete_messages(CHAT_ID, status_msg_id)
+        except: pass
+
+    except Exception as e:
+        print(f"Workflow Exception: {e}")
+        # ALWAYS PURGE THE CURRENT STUCK PROGRESS MESSAGE DURING CRASH
+        if status_msg_id:
+            try:
+                await app.delete_messages(CHAT_ID, status_msg_id)
+            except:
+                pass
+        try:
+            # Safe HTML Escaping for Pyrogram's Telegram delivery
+            clean_err = html.escape(str(e))
+            await app.send_message(CHAT_ID, f"❌ **Workflow Run Crash:**\n<code>{clean_err}</code>", parse_mode=ParseMode.HTML)
+        except Exception as msg_err:
+            print(f"Failed to post crash log: {msg_err}")
+    finally:
+        await app.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())
