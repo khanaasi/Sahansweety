@@ -89,7 +89,7 @@ def get_send_bar(percent):
     bar_str = "█" * filled + "░" * (total_slots - filled)
     return f"[{bar_str}] {percent:.0f}%"
 
-# --- PROGRESS CALLBACK DISPATCHER ---
+# --- PROGRESS CALLBACK DISPATCHER (UN-BLOCKING BACKGROUND TASKS) ---
 async def prog(c, t, app, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
@@ -98,7 +98,7 @@ async def prog(c, t, app, step_name):
         last_time = now
         return
         
-    if now - last_time > 5 or c == t:
+    if now - last_time > 6 or c == t:
         elapsed = now - start_time
         speed = c / elapsed if elapsed > 0 else 0
         speed_kb = speed / 1024
@@ -121,11 +121,18 @@ async def prog(c, t, app, step_name):
             text = f"Sending video\n{bar}\nSpeed: {speed_str}"
             
         cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
-        try:
-            await app.edit_message_text(CHAT_ID, status_msg_id, text, reply_markup=cancel_markup)
-        except:
-            pass
+        
+        # Rigorous Un-blocking Decoupling: We launch message edits in the background 
+        # using asyncio.create_task instead of awaiting them. This ensures any Telegram FloodWait 
+        # or edit rate-limit NEVER blocks the main media download/upload stream.
+        asyncio.create_task(edit_msg_safe(app, CHAT_ID, status_msg_id, text, cancel_markup))
         last_time = now
+
+async def edit_msg_safe(app, chat_id, msg_id, text, markup):
+    try:
+        await app.edit_message_text(chat_id, msg_id, text, reply_markup=markup)
+    except:
+        pass
 
 # --- TIMELINES UNALTERED CLEAN ASS EXTRACER ---
 def extract_clean_dialogues(input_subtitle, output_ass):
