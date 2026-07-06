@@ -80,7 +80,7 @@ def _sync_http_edit(text):
 async def update_http_status(text):
     await asyncio.to_thread(_sync_http_edit, text)
 
-# --- FAST 10-SECOND PYROGRAM PROGRESS BAR ---
+# --- PYROGRAM 10-SECOND PROGRESS BAR ---
 async def prog(c, t, app_instance, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
@@ -171,8 +171,8 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
     if not os.path.exists(thumb_path): thumb_path = None
 
     desk_msg, file_id = None, None
-
     reset_prog()
+    
     try:
         desk_msg = await asyncio.wait_for(
             app_instance.send_document(
@@ -207,8 +207,6 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
 # --- MASTER RUNNER ---
 async def main():
     global status_msg_id
-    
-    # MAX CONCURRENT TRANSMISSIONS ADDED = 10x DOWNLOADING SPEED!
     app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=10)
     await app.start()
 
@@ -285,7 +283,6 @@ async def main():
             out_name = f"compressed_{reso_clean if reso_clean else 'output'}.mp4"
             await update_http_status(f"Compress/extract\n{get_process_bar(0)} [0.0%]")
             
-            # MAGICAL FIX FOR SUBS: Added -map 0:v -map 0:a? -map 0:s? -c:s copy
             cmd = [
                 "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", scale_filter, 
                 "-map", "0:v", "-map", "0:a?", "-map", "0:s?",
@@ -294,11 +291,9 @@ async def main():
             ]
             
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
             d_res = subprocess.run(dur_cmd, capture_output=True, text=True)
             duration = float(d_res.stdout.strip()) if d_res.stdout.strip() else 0.1
-
             last_edit = time.time()
             async def read_stdout():
                 nonlocal last_edit
@@ -343,11 +338,9 @@ async def main():
                 ]
 
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
             d_res = subprocess.run(dur_cmd, capture_output=True, text=True)
             duration = float(d_res.stdout.strip()) if d_res.stdout.strip() else 0.1
-
             last_edit = time.time()
             async def read_stdout():
                 nonlocal last_edit
