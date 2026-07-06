@@ -44,15 +44,16 @@ def reset_prog():
     last_time = time.time()
     start_time = time.time()
 
-# --- BALANCED HIGH-SPEED CLIENT CONFIGURATION ---
-# max_concurrent_transmissions=4 prevents Telegram's silent connections throttling.
+# --- SWIFT & ANTI-LOCKING CLIENT CONFIGURATION ---
+# in_memory=True prevents SQLite database locking freezes completely on VM.
 app = Client(
     "WorkflowWorker", 
     api_id=API_ID, 
     api_hash=API_HASH, 
     bot_token=BOT_TOKEN,
     workers=24,
-    max_concurrent_transmissions=4
+    max_concurrent_transmissions=4,
+    in_memory=True
 )
 
 # --- PROGRESS BAR SCHEMES ---
@@ -88,8 +89,8 @@ def get_send_bar(percent):
     bar_str = "█" * filled + "░" * (total_slots - filled)
     return f"[{bar_str}] {percent:.0f}%"
 
-# --- PROGRESS CALLBACK DISPATCHER (UN-BLOCKING BACKGROUND TASKS) ---
-async def prog(c, t, app, step_name):
+# --- PROGRESS CALLBACK DISPATCHER (SYNCHRONOUS TO PREVENT DEADLOCKS) ---
+def prog(c, t, app, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
     if start_time == 0:
@@ -121,8 +122,13 @@ async def prog(c, t, app, step_name):
             
         cancel_markup = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Skip", callback_data="cancel_active_run")]])
         
-        # Safe background task decoupling: edits never block the upload pipeline
-        asyncio.create_task(edit_msg_safe(app, CHAT_ID, status_msg_id, text, cancel_markup))
+        # Un-blocking dispatch: We schedule the message edit in the background safely from the sync callback.
+        # This completely decouples progress bar rendering from the main file uploading streams.
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(edit_msg_safe(app, CHAT_ID, status_msg_id, text, cancel_markup))
+        except RuntimeError:
+            pass
         last_time = now
 
 async def edit_msg_safe(app, chat_id, msg_id, text, markup):
@@ -202,7 +208,7 @@ async def deliver_video_asset(app, chat_id, target_user, file_path, caption, pro
             chat_id=chat_id,
             text=f"⚠️ <a href='tg://user?id={target_user}'>User</a>, aapne bot ko PM me start nahi kiya hai, isliye video PM me nahi bheji ja saki!\n"
                  f"Maine processed video group me hi post kar di hai.",
-            parse_mode=ParseMode.HTML
+            parse_mode="html"
         )
         reset_prog()
         delivery_msg = await asyncio.wait_for(
@@ -359,6 +365,7 @@ async def main():
                 "-c:a", "aac", "-b:a", "128k", out_name
             ]
             
+            # MERGED STREAMS (stderr=subprocess.STDOUT) to completely avoid any OS pipeline deadlock hangs
             process = await asyncio.create_subprocess_exec(
                 *cmd, 
                 stdout=subprocess.PIPE, 
@@ -408,7 +415,7 @@ async def main():
             )
             status_msg_id = upload_msg.id
 
-            # Swift private Document streaming
+            # Safe Private PM + Fallback delivery with consistent progress signatures
             video_uploaded = await deliver_video_asset(
                 app=app,
                 chat_id=CHAT_ID,
@@ -590,4 +597,13 @@ async def main():
             except:
                 pass
         try:
-            error_clean
+            # Safe HTML Escaping for Pyrogram's Telegram delivery
+            error_clean = html.escape(str(e))
+            await app.send_message(CHAT_ID, f"❌ **Workflow Run Crash:**\n<code>{error_clean}</code>", parse_mode="html")
+        except:
+            pass
+    finally:
+        await app.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())
