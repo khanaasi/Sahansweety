@@ -46,7 +46,7 @@ def reset_prog():
     last_time = time.time()
     start_time = time.time()
 
-# --- CUSTOM PROGRESS BAR STYLES (Exactly as requested) ---
+# --- CUSTOM PROGRESS BAR STYLES ---
 def get_download_bar(percent):
     total = 20
     filled = int(percent / 100 * total)
@@ -282,17 +282,20 @@ async def main():
             out_name = f"compressed_{reso_clean if reso_clean else 'output'}.mp4"
             await update_http_status(f"⚙️ Encoding/resize\n{get_process_bar(0)} [0.0%]")
             
+            # FIX: Hata diya "-map 0:s?" aur "-c:s copy" taaki mp4/mkv kisi me bhi error na aaye
             cmd = [
                 "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", scale_filter, 
-                "-map", "0:v", "-map", "0:a?", "-map", "0:s?",
+                "-map", "0:v", "-map", "0:a?", 
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-threads", "0", 
-                "-c:a", "aac", "-b:a", "128k", "-c:s", "copy", "-movflags", "+faststart", out_name
+                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
             ]
             
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
             d_res = subprocess.run(dur_cmd, capture_output=True, text=True)
             duration = float(d_res.stdout.strip()) if d_res.stdout.strip() else 0.1
+
             last_edit = time.time()
             async def read_stdout():
                 nonlocal last_edit
@@ -310,7 +313,7 @@ async def main():
                             last_edit = now
             await read_stdout()
             await process.wait()
-            if process.returncode != 0: raise Exception("FFmpeg compression failed.")
+            if process.returncode != 0: raise Exception("FFmpeg compression failed. Invalid video data.")
 
         elif TASK_TYPE == "hardsub":
             vf_filter = "subtitles='ready_sub.ass':charenc=UTF-8"
@@ -322,24 +325,27 @@ async def main():
 
             await update_http_status(f"⚙️ Encoding/resize\n{get_process_bar(0)} [0.0%]")
 
+            # SPEED FIX: Added "-tune fastdecode" to make Hardsub significantly faster
             if wm_file and os.path.exists(wm_file):
                 cmd = [
                     "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-i", wm_file, 
                     "-filter_complex", f"[0:v]{v_filter}[vsub];[1:v]scale=200:-1[wm];[vsub][wm]overlay={overlay_coord}", 
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-threads", "0", 
+                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "34", "-threads", "0", 
                     "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
                 ]
             else:
                 cmd = [
                     "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", v_filter, 
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-threads", "0", 
+                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "34", "-threads", "0", 
                     "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
                 ]
 
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
             d_res = subprocess.run(dur_cmd, capture_output=True, text=True)
             duration = float(d_res.stdout.strip()) if d_res.stdout.strip() else 0.1
+
             last_edit = time.time()
             async def read_stdout():
                 nonlocal last_edit
