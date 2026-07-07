@@ -1,4 +1,4 @@
-hereimport os
+import os
 import sys
 import time
 import asyncio
@@ -80,7 +80,7 @@ def _sync_http_edit(text):
 async def update_http_status(text):
     await asyncio.to_thread(_sync_http_edit, text)
 
-# --- PYROGRAM 10-SECOND PROGRESS BAR ---
+# --- 10-SEC FAST PROGRESS BAR ---
 async def prog(c, t, app_instance, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
@@ -97,7 +97,7 @@ async def prog(c, t, app_instance, step_name):
         
         if step_name == "hardsub_download" or step_name == "compress_download":
             bar = get_download_bar(percent)
-            text = f"Downloading video\n{bar} [{percent:.0f}%]\n🚀 `{speed_mb:.2f} MB/s` | 📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`"
+            text = f"Downloading video/file\n{bar} [{percent:.0f}%]\n🚀 `{speed_mb:.2f} MB/s` | 📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`"
         else:
             bar = get_send_bar(percent)
             text = f"Sending video\n{bar} [{percent:.0f}%]\n🚀 `{speed_mb:.2f} MB/s` | 📦 `{c/1048576:.1f}MB / {t/1048576:.1f}MB`"
@@ -107,7 +107,7 @@ async def prog(c, t, app_instance, step_name):
         except: pass
         last_time = now
 
-# --- TIMELINES UNALTERED CLEAN ASS EXTRACER ---
+# --- ASS EXTRACTOR ---
 def extract_clean_dialogues(input_subtitle, output_ass):
     try: subs = pysubs2.load(input_subtitle)
     except: subs = pysubs2.load(input_subtitle, encoding="latin-1")
@@ -199,7 +199,7 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
     except Exception as e_pm:
         print(f"[USER PM ERROR] {e_pm}")
         if not pm_msg:
-            try: await app_instance.send_message(chat_id, text=f"⚠️ <a href='tg://user?id={target_user}'>User</a>, video Process ho chuki hai par PM me nahi bhej paaya! Bot ko private me Start karein.", parse_mode=ParseMode.HTML)
+            try: await app_instance.send_message(chat_id, text=f"⚠️ <a href='tg://user?id={target_user}'>User</a>, video Process ho chuki hai par PM me nahi bhej paaya!", parse_mode=ParseMode.HTML)
             except: pass
 
     return pm_msg or desk_msg
@@ -208,6 +208,7 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
 async def main():
     global status_msg_id
     
+    # 10x SPEED CONNECTIONS
     app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=10)
     await app.start()
 
@@ -282,8 +283,9 @@ async def main():
                 scale_filter = "scale='trunc(iw/2)*2:trunc(ih/2)*2'"
 
             out_name = f"compressed_{reso_clean if reso_clean else 'output'}.mp4"
-            await update_http_status(f"Compress/extract\n{get_process_bar(0)} [0.0%]")
+            await update_http_status(f"Encoding/resize\n{get_process_bar(0)} [0.0%]")
             
+            # Subtitle Safe - map 0:v map 0:a? map 0:s?
             cmd = [
                 "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", scale_filter, 
                 "-map", "0:v", "-map", "0:a?", "-map", "0:s?",
@@ -292,9 +294,11 @@ async def main():
             ]
             
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
             d_res = subprocess.run(dur_cmd, capture_output=True, text=True)
             duration = float(d_res.stdout.strip()) if d_res.stdout.strip() else 0.1
+
             last_edit = time.time()
             async def read_stdout():
                 nonlocal last_edit
@@ -307,7 +311,7 @@ async def main():
                         if now - last_edit > 10:
                             try:
                                 percent = min((int(line_str.split("=")[1]) / 1000000.0 / duration) * 100, 100.0)
-                                asyncio.create_task(update_http_status(f"Compress/extract\n{get_process_bar(percent)} [{percent:.1f}%]"))
+                                asyncio.create_task(update_http_status(f"Encoding/resize\n{get_process_bar(percent)} [{percent:.1f}%]"))
                             except: pass
                             last_edit = now
             await read_stdout()
@@ -343,6 +347,7 @@ async def main():
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
             d_res = subprocess.run(dur_cmd, capture_output=True, text=True)
             duration = float(d_res.stdout.strip()) if d_res.stdout.strip() else 0.1
+
             last_edit = time.time()
             async def read_stdout():
                 nonlocal last_edit
