@@ -1,4 +1,4 @@
-import os
+hereimport os
 import sys
 import time
 import asyncio
@@ -171,8 +171,8 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
     if not os.path.exists(thumb_path): thumb_path = None
 
     desk_msg, file_id = None, None
+
     reset_prog()
-    
     try:
         desk_msg = await asyncio.wait_for(
             app_instance.send_document(
@@ -207,6 +207,7 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
 # --- MASTER RUNNER ---
 async def main():
     global status_msg_id
+    
     app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=10)
     await app.start()
 
@@ -321,7 +322,7 @@ async def main():
             overlay_coord = "W-w-15:15" if WM_POS == "right" else "15:15"
             out_name = RENAME if RENAME != "none" else "hardsub_output.mp4"
 
-            await update_http_status(f"Encoding + resizing\n{get_process_bar(0)} [0.0%]")
+            await update_http_status(f"Encoding/resize\n{get_process_bar(0)} [0.0%]")
 
             if wm_file and os.path.exists(wm_file):
                 cmd = [
@@ -338,6 +339,7 @@ async def main():
                 ]
 
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
             d_res = subprocess.run(dur_cmd, capture_output=True, text=True)
             duration = float(d_res.stdout.strip()) if d_res.stdout.strip() else 0.1
@@ -353,7 +355,7 @@ async def main():
                         if now - last_edit > 10:
                             try:
                                 percent = min((int(line_str.split("=")[1]) / 1000000.0 / duration) * 100, 100.0)
-                                asyncio.create_task(update_http_status(f"Encoding + resizing\n{get_process_bar(percent)} [{percent:.1f}%]"))
+                                asyncio.create_task(update_http_status(f"Encoding/resize\n{get_process_bar(percent)} [{percent:.1f}%]"))
                             except: pass
                             last_edit = now
             await read_stdout()
@@ -368,7 +370,7 @@ async def main():
         await update_http_status(f"Sending video\n{get_send_bar(0)} [0.0%]")
         
         if TASK_TYPE == "compress":
-            await deliver_video_asset(app_up, CHAT_ID, USER_ID, out_name, f"✅ Complete 💯 Compression\n`{out_name}`", prog)
+            await deliver_video_asset(app_up, CHAT_ID, USER_ID, out_name, f"✅ Successful\n`{out_name}`", prog)
             
             if 'sub_extracted' in locals() and sub_extracted and os.path.exists(sub_extracted):
                 try:
@@ -378,7 +380,7 @@ async def main():
                 except: pass
 
         elif TASK_TYPE == "hardsub":
-            await deliver_video_asset(app_up, CHAT_ID, USER_ID, out_name, f"✅ Complete 💯 Hardsub\n`{out_name}`", prog)
+            await deliver_video_asset(app_up, CHAT_ID, USER_ID, out_name, f"✅ Successful\n`{out_name}`", prog)
 
         try: await app_up.delete_messages(CHAT_ID, status_msg_id)
         except: pass
