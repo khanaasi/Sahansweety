@@ -79,7 +79,7 @@ def _sync_http_edit(text):
 async def update_http_status(text):
     await asyncio.to_thread(_sync_http_edit, text)
 
-# --- EXACT SCREENSHOT 10-SECOND PROGRESS BAR ---
+# --- 10-SECOND FAST PROGRESS BAR ---
 async def prog(c, t, app_instance, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
@@ -105,7 +105,7 @@ async def prog(c, t, app_instance, step_name):
         except: pass
         last_time = now
 
-# --- ASS EXTRACTOR ---
+# --- TIMELINES UNALTERED CLEAN ASS EXTRACER ---
 def extract_clean_dialogues(input_subtitle, output_ass):
     try: subs = pysubs2.load(input_subtitle)
     except: subs = pysubs2.load(input_subtitle, encoding="latin-1")
@@ -206,7 +206,8 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
 async def main():
     global status_msg_id
     
-    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=10)
+    # 🔥 FULL SPEED DOWNLOAD CONNECTION
+    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=32, max_concurrent_transmissions=16)
     await app.start()
 
     if TRIGGER_MSG_ID and TRIGGER_MSG_ID != "none":
@@ -219,7 +220,7 @@ async def main():
     try:
         step_dl = "hardsub_download" if TASK_TYPE == "hardsub" else "compress_download"
         
-        # 🔥 THE MASTER FIX: Hamesha .mkv format me save karo taaki Document ke soft subs detect ho sakein
+        # MKV TAAKI SUBTITLE EXTRACT HO SAKE
         video_file = await download_tg_link(app, VIDEO_ID, "video.mkv", step_dl)
         if not video_file or not os.path.exists(video_file) or os.path.getsize(video_file) < 1000:
             raise Exception("Telegram video download failed.")
@@ -270,7 +271,6 @@ async def main():
         if TASK_TYPE == "compress":
             sub_extracted = "extracted_clean.ass"
             try:
-                # MKV CONTAINER SE SUB EXTRACT KARNA
                 subprocess.run(["ffmpeg", "-y", "-i", video_file, "-map", "0:s:0", "raw_sub.ass"], capture_output=True)
                 if os.path.exists("raw_sub.ass") and os.path.getsize("raw_sub.ass") > 0: 
                     extract_clean_dialogues("raw_sub.ass", sub_extracted)
@@ -286,10 +286,11 @@ async def main():
             out_name = f"compressed_{reso_clean if reso_clean else 'output'}.mp4"
             await update_http_status(f"⚙️ Encoding/resize\n{get_process_bar(0)} [0.0%]")
             
-            # 🔥 SPEED FIX: -tune fastdecode added for ultra speed!
+            # 🔥 ULTRAFAST SPEED FLAGS RESTORED (-crf 30, no tune limits)
             cmd = [
                 "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", scale_filter, 
-                "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "34", "-threads", "0", 
+                "-map", "0:v", "-map", "0:a?", 
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-threads", "0", 
                 "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
             ]
             
@@ -326,18 +327,18 @@ async def main():
 
             await update_http_status(f"⚙️ Encoding/resize\n{get_process_bar(0)} [0.0%]")
 
-            # 🔥 SPEED FIX: -tune fastdecode added for ultra speed!
+            # 🔥 ULTRAFAST SPEED FLAGS RESTORED
             if wm_file and os.path.exists(wm_file):
                 cmd = [
                     "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-i", wm_file, 
                     "-filter_complex", f"[0:v]{v_filter}[vsub];[1:v]scale=200:-1[wm];[vsub][wm]overlay={overlay_coord}", 
-                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "34", "-threads", "0", 
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-threads", "0", 
                     "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
                 ]
             else:
                 cmd = [
                     "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", v_filter, 
-                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "34", "-threads", "0", 
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-threads", "0", 
                     "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
                 ]
 
@@ -366,7 +367,8 @@ async def main():
 
 
         # ---------------- PHASE 3: UPLOAD ----------------
-        app_up = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=10)
+        # 🔥 FULL SPEED UPLOAD CONNECTION
+        app_up = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=32, max_concurrent_transmissions=16)
         await app_up.start()
         
         await update_http_status(f"📤 Sending Video\n{get_send_bar(0)} [0.0%]")
