@@ -79,7 +79,7 @@ def _sync_http_edit(text):
 async def update_http_status(text):
     await asyncio.to_thread(_sync_http_edit, text)
 
-# --- 10-SECOND FAST PROGRESS BAR ---
+# --- EXACT SCREENSHOT 10-SECOND PROGRESS BAR ---
 async def prog(c, t, app_instance, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
@@ -206,8 +206,7 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
 async def main():
     global status_msg_id
     
-    # 🔥 FULL SPEED DOWNLOAD CONNECTION
-    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=32, max_concurrent_transmissions=16)
+    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=10)
     await app.start()
 
     if TRIGGER_MSG_ID and TRIGGER_MSG_ID != "none":
@@ -219,9 +218,7 @@ async def main():
 
     try:
         step_dl = "hardsub_download" if TASK_TYPE == "hardsub" else "compress_download"
-        
-        # MKV TAAKI SUBTITLE EXTRACT HO SAKE
-        video_file = await download_tg_link(app, VIDEO_ID, "video.mkv", step_dl)
+        video_file = await download_tg_link(app, VIDEO_ID, "video.mp4", step_dl)
         if not video_file or not os.path.exists(video_file) or os.path.getsize(video_file) < 1000:
             raise Exception("Telegram video download failed.")
 
@@ -271,9 +268,8 @@ async def main():
         if TASK_TYPE == "compress":
             sub_extracted = "extracted_clean.ass"
             try:
-                subprocess.run(["ffmpeg", "-y", "-i", video_file, "-map", "0:s:0", "raw_sub.ass"], capture_output=True)
-                if os.path.exists("raw_sub.ass") and os.path.getsize("raw_sub.ass") > 0: 
-                    extract_clean_dialogues("raw_sub.ass", sub_extracted)
+                subprocess.run(["ffmpeg", "-y", "-i", video_file, "-map", "0:s:0", "raw_sub.srt"], capture_output=True)
+                if os.path.exists("raw_sub.srt") and os.path.getsize("raw_sub.srt") > 0: extract_clean_dialogues("raw_sub.srt", sub_extracted)
                 else: sub_extracted = None
             except: sub_extracted = None
 
@@ -286,18 +282,20 @@ async def main():
             out_name = f"compressed_{reso_clean if reso_clean else 'output'}.mp4"
             await update_http_status(f"⚙️ Encoding/resize\n{get_process_bar(0)} [0.0%]")
             
-            # 🔥 ULTRAFAST SPEED FLAGS RESTORED (-crf 30, no tune limits)
+            # FIX: Hata diya "-map 0:s?" aur "-c:s copy" taaki mp4/mkv kisi me bhi error na aaye
             cmd = [
                 "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", scale_filter, 
                 "-map", "0:v", "-map", "0:a?", 
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-threads", "0", 
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-threads", "0", 
                 "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
             ]
             
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
             d_res = subprocess.run(dur_cmd, capture_output=True, text=True)
             duration = float(d_res.stdout.strip()) if d_res.stdout.strip() else 0.1
+
             last_edit = time.time()
             async def read_stdout():
                 nonlocal last_edit
@@ -327,25 +325,27 @@ async def main():
 
             await update_http_status(f"⚙️ Encoding/resize\n{get_process_bar(0)} [0.0%]")
 
-            # 🔥 ULTRAFAST SPEED FLAGS RESTORED
+            # SPEED FIX: Added "-tune fastdecode" to make Hardsub significantly faster
             if wm_file and os.path.exists(wm_file):
                 cmd = [
                     "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-i", wm_file, 
                     "-filter_complex", f"[0:v]{v_filter}[vsub];[1:v]scale=200:-1[wm];[vsub][wm]overlay={overlay_coord}", 
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-threads", "0", 
+                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "34", "-threads", "0", 
                     "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
                 ]
             else:
                 cmd = [
                     "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", v_filter, 
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-threads", "0", 
+                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode", "-crf", "34", "-threads", "0", 
                     "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
                 ]
 
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
             d_res = subprocess.run(dur_cmd, capture_output=True, text=True)
             duration = float(d_res.stdout.strip()) if d_res.stdout.strip() else 0.1
+
             last_edit = time.time()
             async def read_stdout():
                 nonlocal last_edit
@@ -367,8 +367,7 @@ async def main():
 
 
         # ---------------- PHASE 3: UPLOAD ----------------
-        # 🔥 FULL SPEED UPLOAD CONNECTION
-        app_up = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=32, max_concurrent_transmissions=16)
+        app_up = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, max_concurrent_transmissions=10)
         await app_up.start()
         
         await update_http_status(f"📤 Sending Video\n{get_send_bar(0)} [0.0%]")
