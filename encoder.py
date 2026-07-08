@@ -62,7 +62,7 @@ def get_process_bar(percent):
 def get_send_bar(percent):
     total = 20
     filled = int(percent / 100 * total)
-    return f"[{'▓' * filled}{'▒' * (total - filled)}]"
+    return f"[{'▓' * filled}{'░' * (total - filled)}]"
 
 # --- HTTP UI UPDATER ---
 def _sync_http_edit(text):
@@ -79,7 +79,7 @@ def _sync_http_edit(text):
 async def update_http_status(text):
     await asyncio.to_thread(_sync_http_edit, text)
 
-# --- 10-SECOND FAST PROGRESS BAR ---
+# --- EXACT SCREENSHOT 10-SECOND PROGRESS BAR ---
 async def prog(c, t, app_instance, step_name):
     global last_time, start_time, status_msg_id
     now = time.time()
@@ -197,7 +197,7 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
     except Exception as e_pm:
         print(f"[USER PM ERROR] {e_pm}")
         if not pm_msg:
-            try: await app_instance.send_message(chat_id, text=f"⚠️ <a href='tg://user?id={target_user}'>User</a>, video Process ho chuki hai par PM me nahi bhej paaya! Bot ko private me Start karein.", parse_mode=ParseMode.HTML)
+            try: await app_instance.send_message(chat_id, text=f"⚠️ <a href='tg://user?id={target_user}'>User</a>, video Process ho chuki hai par PM me nahi bhej paaya!", parse_mode=ParseMode.HTML)
             except: pass
 
     return pm_msg or desk_msg
@@ -206,8 +206,8 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
 async def main():
     global status_msg_id
     
-    # 🔥 FULL SPEED DOWNLOAD CONNECTION
-    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=32, max_concurrent_transmissions=16)
+    # 🔥 DOWNLOAD ENGINE RE-TUNED (Sweet spot: workers=10, chunks=10 prevents Telegram rate limit slowdowns)
+    app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, max_concurrent_transmissions=10)
     await app.start()
 
     if TRIGGER_MSG_ID and TRIGGER_MSG_ID != "none":
@@ -220,7 +220,7 @@ async def main():
     try:
         step_dl = "hardsub_download" if TASK_TYPE == "hardsub" else "compress_download"
         
-        # MKV TAAKI SUBTITLE EXTRACT HO SAKE
+        # MKV ALWAYS (Guarantees Soft-Sub detection)
         video_file = await download_tg_link(app, VIDEO_ID, "video.mkv", step_dl)
         if not video_file or not os.path.exists(video_file) or os.path.getsize(video_file) < 1000:
             raise Exception("Telegram video download failed.")
@@ -271,7 +271,8 @@ async def main():
         if TASK_TYPE == "compress":
             sub_extracted = "extracted_clean.ass"
             try:
-                subprocess.run(["ffmpeg", "-y", "-i", video_file, "-map", "0:s:0", "raw_sub.ass"], capture_output=True)
+                # 🔥 ULTRAFAST EXTRACT (1 second stream copy)
+                subprocess.run(["ffmpeg", "-y", "-i", video_file, "-map", "0:s:0", "-c:s", "copy", "raw_sub.ass"], capture_output=True)
                 if os.path.exists("raw_sub.ass") and os.path.getsize("raw_sub.ass") > 0: 
                     extract_clean_dialogues("raw_sub.ass", sub_extracted)
                 else: sub_extracted = None
@@ -284,13 +285,13 @@ async def main():
                 scale_filter = "scale='trunc(iw/2)*2:trunc(ih/2)*2'"
 
             out_name = f"compressed_{reso_clean if reso_clean else 'output'}.mp4"
-            await update_http_status(f"⚙️ Encoding/resize\n{get_process_bar(0)} [0.0%]")
+            await update_http_status(f"⚙️ Compress/extract\n{get_process_bar(0)} [0.0%]")
             
-            # 🔥 ULTRAFAST SPEED FLAGS RESTORED (-crf 30, no tune limits)
+            # 🔥 ULTRAFAST COMPRESS ENGINE (-tune fastdecode,zerolatency)
             cmd = [
                 "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", scale_filter, 
                 "-map", "0:v", "-map", "0:a?", 
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-threads", "0", 
+                "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode,zerolatency", "-crf", "34", "-threads", "0", 
                 "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
             ]
             
@@ -310,7 +311,7 @@ async def main():
                         if now - last_edit > 10:
                             try:
                                 percent = min((int(line_str.split("=")[1]) / 1000000.0 / duration) * 100, 100.0)
-                                asyncio.create_task(update_http_status(f"⚙️ Encoding/resize\n{get_process_bar(percent)} [{percent:.1f}%]"))
+                                asyncio.create_task(update_http_status(f"⚙️ Compress/extract\n{get_process_bar(percent)} [{percent:.1f}%]"))
                             except: pass
                             last_edit = now
             await read_stdout()
@@ -327,18 +328,18 @@ async def main():
 
             await update_http_status(f"⚙️ Encoding/resize\n{get_process_bar(0)} [0.0%]")
 
-            # 🔥 ULTRAFAST SPEED FLAGS RESTORED
+            # 🔥 ULTRAFAST HARDSUB ENGINE (-tune fastdecode,zerolatency)
             if wm_file and os.path.exists(wm_file):
                 cmd = [
                     "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-i", wm_file, 
                     "-filter_complex", f"[0:v]{v_filter}[vsub];[1:v]scale=200:-1[wm];[vsub][wm]overlay={overlay_coord}", 
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-threads", "0", 
+                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode,zerolatency", "-crf", "34", "-threads", "0", 
                     "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
                 ]
             else:
                 cmd = [
                     "ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", v_filter, 
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30", "-threads", "0", 
+                    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "fastdecode,zerolatency", "-crf", "34", "-threads", "0", 
                     "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out_name
                 ]
 
@@ -367,8 +368,8 @@ async def main():
 
 
         # ---------------- PHASE 3: UPLOAD ----------------
-        # 🔥 FULL SPEED UPLOAD CONNECTION
-        app_up = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=32, max_concurrent_transmissions=16)
+        # 🔥 UPLOAD ENGINE RE-TUNED
+        app_up = Client("worker_up", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN, workers=10, max_concurrent_transmissions=10)
         await app_up.start()
         
         await update_http_status(f"📤 Sending Video\n{get_send_bar(0)} [0.0%]")
