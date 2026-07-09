@@ -1,4 +1,4 @@
-name: Video Processing Workflow
+name: Video Encoder Workflow
 
 on:
   workflow_dispatch:
@@ -29,20 +29,23 @@ on:
 jobs:
   encode_job:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 180
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-      - name: Install System Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg fontconfig
+
+      - name: Install System Deps
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fontconfig
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: 'pip' # 🔥 MAGIC FLAG: Ye packages ko hamesha ke liye Cache kar dega!
+          
       - name: Install Python Deps
         run: pip install pyrogram tgcrypto pysubs2 requests fonttools
+        
       - name: Run Dedicated Video Worker
         env:
           API_ID: ${{ secrets.API_ID }}
@@ -59,7 +62,8 @@ jobs:
           RENAME: ${{ github.event.inputs.rename }}
           FONT_LINK: ${{ github.event.inputs.font_link }}
           TRIGGER_MSG_ID: ${{ github.event.inputs.trigger_msg_id }}
-        run: python encoder.py
+        run: python ai_studio_code\ \(1\).py
+        
       - name: Cleanup
         if: always()
         run: rm -rf *
