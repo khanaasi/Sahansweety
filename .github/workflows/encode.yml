@@ -1,5 +1,10 @@
 name: Video Encoder Workflow
 
+# 🔥 Ek baar me ek task run hoga, baaki wait karenge!
+concurrency:
+  group: processing
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:
@@ -41,7 +46,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-          cache: 'pip' # 🔥 MAGIC FLAG: Ye packages ko hamesha ke liye Cache kar dega!
+          cache: 'pip' # 🔥 TOOLS CACHED (Ab baar-baar download nahi honge)
           
       - name: Install Python Deps
         run: pip install pyrogram tgcrypto pysubs2 requests fonttools
