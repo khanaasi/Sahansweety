@@ -1,4 +1,4 @@
-name: Video Encoder Workflow
+name: Video Master Workflow
 
 # 🔥 Ek baar me ek task run hoga, baaki wait karenge!
 concurrency:
@@ -39,14 +39,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install System Deps
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg fontconfig
+      # 🔥 TOOLS CACHED (Ab baar-baar FFmpeg aur Fonts download nahi honge)
+      - name: Cache APT Packages (FFmpeg/Fontconfig)
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: ffmpeg fontconfig
+          version: 1.0
+          execute_install_scripts: true
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-          cache: 'pip' # 🔥 TOOLS CACHED (Ab baar-baar download nahi honge)
+          cache: 'pip' # 🔥 PIP Cache Enabled
           
       - name: Install Python Deps
         run: pip install pyrogram tgcrypto pysubs2 requests fonttools
@@ -67,7 +72,7 @@ jobs:
           RENAME: ${{ github.event.inputs.rename }}
           FONT_LINK: ${{ github.event.inputs.font_link }}
           TRIGGER_MSG_ID: ${{ github.event.inputs.trigger_msg_id }}
-        run: python ai_studio_code\ \(1\).py
+        run: python "ai_studio_code (1).py"
         
       - name: Cleanup
         if: always()
