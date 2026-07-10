@@ -158,7 +158,6 @@ async def deliver_video_asset(app_instance, chat_id, target_user, file_path, cap
 
 async def main():
     global status_msg_id
-    # 🔥 FASTEST ORIGINAL CLIENT
     app = Client("worker_down", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
 
@@ -176,7 +175,6 @@ async def main():
 
         orig_width, orig_height, duration = get_video_dimensions_and_duration(video_file)
         
-        # 🔥 ORIGINAL FILE NAME FIX
         base_name = "output"
         if RENAME and RENAME != "none":
             base_name = RENAME.rsplit('.', 1)[0]
@@ -217,9 +215,9 @@ async def main():
             if WM_ID != "none" and not has_watermark:
                 wm_file = await download_tg_link(app, WM_ID, "watermark.png", "hardsub_download")
 
-        await app.stop()
+        await app.stop() # Disconnect for Freeze-Free Encoding!
 
-        # ---------------- PHASE 2: ENCODE ----------------
+        # ---------------- PHASE 2: ENCODE (MAX SPEED 🔥) ----------------
         process_title = "Compressing/extracting" if TASK_TYPE == "compress" else "Hardsubing"
 
         if TASK_TYPE == "compress":
@@ -235,8 +233,8 @@ async def main():
 
             await update_http_status(f"⚙️ {process_title}\n{get_process_bar(0)} [0.0%]")
             
-            # 🔥 ORIGINAL FAST FFMPEG LOGIC
-            cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", scale_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out_name]
+            # 🔥 MAX SPEED THREADS ENABLED (-threads 0 & -c:a copy)
+            cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", scale_filter, "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0", "-crf", "30", "-c:a", "copy", out_name]
             
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
@@ -268,11 +266,11 @@ async def main():
 
             await update_http_status(f"⚙️ {process_title}\n{get_process_bar(0)} [0.0%]")
 
-            # 🔥 ORIGINAL FAST FFMPEG LOGIC
+            # 🔥 MAX SPEED THREADS ENABLED (-threads 0 & -c:a copy)
             if wm_file and os.path.exists(wm_file):
-                cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-i", wm_file, "-filter_complex", f"[0:v]{v_filter}[vsub];[1:v]scale=200:-1[wm];[vsub][wm]overlay={overlay_coord}", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out_name]
+                cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-i", wm_file, "-filter_complex", f"[0:v]{v_filter}[vsub];[1:v]scale=200:-1[wm];[vsub][wm]overlay={overlay_coord}", "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0", "-crf", "30", "-c:a", "copy", out_name]
             else:
-                cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", v_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-c:a", "aac", out_name]
+                cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", v_filter, "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0", "-crf", "30", "-c:a", "copy", out_name]
 
             process = await asyncio.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             dur_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", video_file]
