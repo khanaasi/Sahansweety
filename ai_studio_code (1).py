@@ -218,31 +218,43 @@ async def main():
             if not sub_file or not os.path.exists(sub_file):
                 raise Exception("Subtitle download failed or missing.")
 
-            try: subs = pysubs2.load(sub_file, encoding="utf-8")
-            except: subs = pysubs2.load(sub_file, encoding="latin-1")
-
             if sub_file.lower().endswith('.ass'):
-                with open(sub_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    if any(word in f.read().lower() for word in ["logo", "watermark", "cr", "credit"]): has_watermark = True
-                
-                # 🔥 FIX: ASS Subtitle Logo Style me Alignment default Top-Right (9) rakha hai
-                target_align = 7 if WM_POS and "left" in str(WM_POS).lower() else 9
-                for s_name, style_obj in subs.styles.items():
-                    if any(word in s_name.lower() for word in ["logo", "watermark", "cr", "credit", "wm"]):
-                        style_obj.alignment = target_align # 9 = Top Right (Default), 7 = Top Left
-                        style_obj.marginr = 15
-                        style_obj.marginv = 15
-                    if FONT_LINK and FONT_LINK != "none":
-                        style_obj.fontname = font_name
+                # 🛠️ Direct Text Stream Processing for ASS Files (Avoids pysubs2 unicode structure breakage)
+                try:
+                    with open(sub_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        ass_content = f.read()
+                except Exception:
+                    with open(sub_file, 'r', encoding='latin-1', errors='ignore') as f:
+                        ass_content = f.read()
+
+                if any(word in ass_content.lower() for word in ["logo", "watermark", "cr", "credit"]):
+                    has_watermark = True
+
+                if FONT_LINK and FONT_LINK != "none":
+                    lines = ass_content.splitlines()
+                    new_lines = []
+                    for line in lines:
+                        if line.strip().startswith("Style:"):
+                            parts = line.split(",", 2)
+                            if len(parts) >= 3:
+                                line = f"{parts[0]},{font_name},{parts[2]}"
+                        new_lines.append(line)
+                    with open("ready_sub.ass", "w", encoding="utf-8") as f:
+                        f.write("\n".join(new_lines))
+                else:
+                    shutil.copy(sub_file, "ready_sub.ass")
             else:
+                # Standard SRT to ASS conversion
+                try: subs = pysubs2.load(sub_file, encoding="utf-8")
+                except: subs = pysubs2.load(sub_file, encoding="latin-1")
+                
                 new_subs = pysubs2.SSAFile()
                 new_subs.styles["Default"] = pysubs2.SSAStyle(fontname=font_name, fontsize=24, primarycolor=pysubs2.Color(255, 255, 255), outlinecolor=pysubs2.Color(0, 0, 0), outline=2, shadow=1, marginl=20, marginr=20, marginv=15)
                 for line in subs:
                     clean_text = re.sub(r'<[^>]+>', '', re.sub(r'\{[^}]+\}', '', line.text)).replace('\r', '').replace('\n', '\\N').strip()
                     if clean_text: new_subs.append(pysubs2.SSAEvent(start=line.start, end=line.end, text=clean_text, style="Default"))
-                subs = new_subs
+                new_subs.save("ready_sub.ass")
 
-            subs.save("ready_sub.ass")
             if WM_ID and WM_ID != "none" and not has_watermark:
                 wm_file = await download_tg_link(app, WM_ID, "watermark.png", "hardsub_download")
 
@@ -303,18 +315,12 @@ async def main():
             vf_filter = "subtitles='ready_sub.ass':charenc=UTF-8"
             if FONT_LINK and FONT_LINK != "none": vf_filter += ":fontsdir=fonts"
             v_filter = f"scale='trunc(iw/2)*2:trunc(ih/2)*2',{vf_filter}"
-
-            # 🔥 DEFAULT POSITION: TOP-RIGHT (Right Side Top Corner)
-            wm_pos_clean = str(WM_POS).lower().strip() if WM_POS else "right"
-            if "left" in wm_pos_clean:
-                overlay_coord = "15:15"  # Top Left
-            else:
-                overlay_coord = "main_w-overlay_w-15:15"  # Top Right (DEFAULT)
+            overlay_coord = "W-w-15:15" if WM_POS == "right" else "15:15"
 
             await update_http_status(f"⚙️ {process_title}\n{get_process_bar(0)} [0.0%]")
 
             if wm_file and os.path.exists(wm_file):
-                cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-i", wm_file, "-filter_complex", f"[0:v]{v_filter}[vsub];[1:v]scale=180:-2[wm];[vsub][wm]overlay={overlay_coord}", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-pix_fmt", "yuv420p", "-threads", "0", "-c:a", "aac", "-movflags", "+faststart", out_name]
+                cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-i", wm_file, "-filter_complex", f"[0:v]{v_filter}[vsub];[1:v]scale=200:-1[wm];[vsub][wm]overlay={overlay_coord}", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-pix_fmt", "yuv420p", "-threads", "0", "-c:a", "aac", "-movflags", "+faststart", out_name]
             else:
                 cmd = ["ffmpeg", "-y", "-progress", "pipe:1", "-i", video_file, "-vf", v_filter, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "34", "-pix_fmt", "yuv420p", "-threads", "0", "-c:a", "aac", "-movflags", "+faststart", out_name]
 
