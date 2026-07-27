@@ -86,4 +86,4 @@ jobs:
           FONT_LINK: ${{ github.event.inputs.font_link }}
           TRIGGER_MSG_ID: ${{ github.event.inputs.trigger_msg_id }}
         run: |
-          python "ai_studio_code (1).py"
+          python studio.py
