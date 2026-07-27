@@ -223,15 +223,14 @@ async def main():
 
             if sub_file.lower().endswith('.ass'):
                 with open(sub_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    if any(word in f.read().lower() for word in ["logo", "watermark", "cr", "credit", "wm"]): 
-                        has_watermark = True
+                    if any(word in f.read().lower() for word in ["logo", "watermark", "cr", "credit"]): has_watermark = True
                 
-                # 🔥 FIX: ASS Subtitle Style me Watermark/Logo ko TOP-LEFT (Alignment 7) set karna
-                target_align = 9 if WM_POS and "right" in str(WM_POS).lower() else 7
+                # 🔥 FIX: ASS Subtitle Logo Style me Alignment default Top-Right (9) rakha hai
+                target_align = 7 if WM_POS and "left" in str(WM_POS).lower() else 9
                 for s_name, style_obj in subs.styles.items():
                     if any(word in s_name.lower() for word in ["logo", "watermark", "cr", "credit", "wm"]):
-                        style_obj.alignment = target_align # 7 = Top Left, 9 = Top Right
-                        style_obj.marginl = 15
+                        style_obj.alignment = target_align # 9 = Top Right (Default), 7 = Top Left
+                        style_obj.marginr = 15
                         style_obj.marginv = 15
                     if FONT_LINK and FONT_LINK != "none":
                         style_obj.fontname = font_name
@@ -305,11 +304,12 @@ async def main():
             if FONT_LINK and FONT_LINK != "none": vf_filter += ":fontsdir=fonts"
             v_filter = f"scale='trunc(iw/2)*2:trunc(ih/2)*2',{vf_filter}"
 
-            wm_pos_clean = str(WM_POS).lower().strip() if WM_POS else "left"
-            if "right" in wm_pos_clean:
-                overlay_coord = "main_w-overlay_w-15:15"  # Top Right
-            else:
+            # 🔥 DEFAULT POSITION: TOP-RIGHT (Right Side Top Corner)
+            wm_pos_clean = str(WM_POS).lower().strip() if WM_POS else "right"
+            if "left" in wm_pos_clean:
                 overlay_coord = "15:15"  # Top Left
+            else:
+                overlay_coord = "main_w-overlay_w-15:15"  # Top Right (DEFAULT)
 
             await update_http_status(f"⚙️ {process_title}\n{get_process_bar(0)} [0.0%]")
 
