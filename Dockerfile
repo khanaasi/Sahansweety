@@ -18,4 +18,4 @@ COPY . /app
 # Grant full read/write/execute permissions
 RUN chmod -R 777 /app
 
-CMD ["python", "ai_studio_code (1).py"]
+CMD ["python", "studio.py"]
