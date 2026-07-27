@@ -126,6 +126,16 @@ async def download_tg_link(app_instance, link, output_path, step_name):
         msg_id = int(link.split("/")[-1])
         msg = await app_instance.get_messages(CHAT_ID, msg_id)
         if msg and (msg.document or msg.video or msg.photo or msg.animation):
+            # ओरिजिनल फाइल एक्सटेंशन को सुरक्षित रखने के लिए
+            ext = ""
+            if msg.document and msg.document.file_name:
+                _, ext = os.path.splitext(msg.document.file_name)
+            elif msg.video and msg.video.file_name:
+                _, ext = os.path.splitext(msg.video.file_name)
+            
+            if ext and not output_path.endswith(ext.lower()):
+                output_path = output_path + ext.lower()
+                
             reset_prog()
             return await asyncio.wait_for(
                 msg.download(file_name=output_path, progress=prog, progress_args=(app_instance, step_name)), 
@@ -218,8 +228,8 @@ async def main():
             if not sub_file or not os.path.exists(sub_file):
                 raise Exception("Subtitle download failed or missing.")
 
+            # ओरिजिनल .ass फाइल डिटेक्शन
             if sub_file.lower().endswith('.ass'):
-                # 🛠️ Direct Text Stream Processing for ASS Files (Avoids pysubs2 unicode structure breakage)
                 try:
                     with open(sub_file, 'r', encoding='utf-8', errors='ignore') as f:
                         ass_content = f.read()
@@ -230,6 +240,7 @@ async def main():
                 if any(word in ass_content.lower() for word in ["logo", "watermark", "cr", "credit"]):
                     has_watermark = True
 
+                # अगर FONT_LINK दिया है तो केवल फोंट्स नाम बदलें, बाकी सारी सेटिंग्स और स्टाइल सुरक्षित रखें
                 if FONT_LINK and FONT_LINK != "none":
                     lines = ass_content.splitlines()
                     new_lines = []
@@ -244,7 +255,7 @@ async def main():
                 else:
                     shutil.copy(sub_file, "ready_sub.ass")
             else:
-                # Standard SRT to ASS conversion
+                # SRT या अन्य फॉर्मेट्स के लिए कन्वर्शन
                 try: subs = pysubs2.load(sub_file, encoding="utf-8")
                 except: subs = pysubs2.load(sub_file, encoding="latin-1")
                 
