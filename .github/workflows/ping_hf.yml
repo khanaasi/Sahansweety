@@ -1,0 +1,29 @@
+name: Keep Hugging Face Alive (5 Min Ping)
+
+on:
+  schedule:
+    # Har 5 minute me HF ko jagayega
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Manual test button
+
+jobs:
+  ping-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Hugging Face Space Direct URL
+        run: |
+          URL="https://asif123anime-mangajii.hf.space"
+          
+          echo "Pinging Direct HF Space: $URL"
+          STATUS=$(curl -sL -w "%{http_code}" -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" "$URL" -o /dev/null)
+          
+          echo "--------------------------------------"
+          echo "Server Response Status: $STATUS"
+          echo "--------------------------------------"
+          
+          if [ "$STATUS" -eq 200 ]; then
+            echo "✅ SUCCESS: Hugging Face Space is Awake and Running!"
+          else
+            echo "❌ WARNING: Space responded with status $STATUS"
+            exit 1
+          fi
